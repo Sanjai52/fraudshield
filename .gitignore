@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+*.env
+
+# Training data — too large / reproducible via scripts
+ml/data/raw/
+ml/data/processed/*.csv
+
+# Model weights — too large for git
+ml/registry/
+services/engine/registry/
+
+# Node / Next.js
+node_modules/
+.next/
+.vercel/
+*.tsbuildinfo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Credentials
+kaggle.json
+.kaggle/
+
+# Supabase local
+.supabase/
+supabase/.temp/
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+logs/

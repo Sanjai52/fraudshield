@@ -5,3 +5,5 @@ torch>=2.2.0
 safetensors>=0.4.3
 pydantic==2.7.0
 python-dotenv==1.0.0
+requests==2.31.0
+python-whois==0.9.4

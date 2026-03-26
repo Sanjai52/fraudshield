@@ -54,21 +54,23 @@ export default function VerdictBanner({ display_verdict, confidence, action }: P
       </div>
 
       {/* Action step */}
-      <div style={{
-        marginTop:   18,
-        paddingTop:  18,
-        borderTop:   `1px solid ${cfg.border}`,
-        fontSize:    14,
-        color:       cfg.color,
-        fontWeight:  500,
-        lineHeight:  1.6,
-        display:     "flex",
-        alignItems:  "flex-start",
-        gap:         8,
-      }}>
-        <span style={{ flexShrink: 0 }}>👉</span>
-        <span>{action}</span>
-      </div>
+      {action && (
+        <div style={{
+          marginTop:   18,
+          paddingTop:  18,
+          borderTop:   `1px solid ${cfg.border}`,
+          fontSize:    14,
+          color:       cfg.color,
+          fontWeight:  500,
+          lineHeight:  1.6,
+          display:     "flex",
+          alignItems:  "flex-start",
+          gap:         8,
+        }}>
+          <span style={{ flexShrink: 0 }}>👉</span>
+          <span>{action}</span>
+        </div>
+      )}
     </div>
   );
 }

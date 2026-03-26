@@ -76,7 +76,9 @@ export default function ResultCard({ result }: { result: AnalysisResult }) {
       {result.explanation && (
         <div>
           <p className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: "var(--text-muted)" }}>
-            Why we flagged this
+            {result.verdict === "SAFE" || (result as any).display_verdict === "LEGITIMATE"
+              ? "Analysis summary"
+              : "Why we flagged this"}
           </p>
           <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
             {result.explanation}

@@ -9,7 +9,11 @@ export default function ResultPage() {
 
   useEffect(() => {
     const stored = localStorage.getItem("fraud_result");
-    if (stored) setData(JSON.parse(stored));
+    if (stored) {
+      // Clear immediately so a back-navigate never shows a stale result
+      localStorage.removeItem("fraud_result");
+      setData(JSON.parse(stored));
+    }
   }, []);
 
   if (!data) return (
@@ -39,9 +43,21 @@ export default function ResultPage() {
 
           {/* Verdict */}
           <VerdictBanner
-            display_verdict={data.display_verdict ?? (data.verdict === "FRAUD" ? "HIGH_FRAUD" : "LEGITIMATE")}
+            display_verdict={
+              data.display_verdict ??
+              (data.verdict === "DANGEROUS" ? "HIGH_FRAUD" :
+               data.verdict === "SUSPICIOUS" ? "SUSPICIOUS" :
+               "LEGITIMATE")
+            }
             confidence={data.confidence ?? 0}
-            action={data.action ?? ""}
+            action={
+              data.action ||
+              (data.verdict === "DANGEROUS" || data.display_verdict === "HIGH_FRAUD"
+                ? "Do NOT click any links or share personal info. Report this to cybercrime.gov.in or call 1930."
+                : data.verdict === "SUSPICIOUS" || data.display_verdict === "SUSPICIOUS"
+                ? "Proceed with caution. Verify the sender through official channels before responding."
+                : "This message appears safe, but always stay vigilant.")
+            }
           />
 
           {/* Original input */}
@@ -66,6 +82,15 @@ export default function ResultPage() {
           )}
 
           {/* Evidence */}
+          {!isUrl && data.display_verdict === "LEGITIMATE" && (
+            <div className="card" style={{ padding: "20px 24px" }}>
+              <div className="section-label">Analysis summary</div>
+              <p style={{ margin: "10px 0 0", fontSize: 15, lineHeight: 1.75, color: "var(--foreground)" }}>
+                {data.explanation ?? "No fraud patterns detected."}
+              </p>
+            </div>
+          )}
+
           {isUrl ? (
             <div className="card" style={{ padding: "20px 24px" }}>
               <div className="section-label">URL evidence breakdown</div>
@@ -91,14 +116,14 @@ export default function ResultPage() {
                 <p style={{ margin: "16px 0 0", fontSize: 14, color: "var(--muted)", lineHeight: 1.7 }}>{data.explanation}</p>
               )}
             </div>
-          ) : (
+          ) : data.display_verdict !== "LEGITIMATE" ? (
             <EvidencePanel
               signals={data.signals ?? []}
               sender_check={data.sender_check ?? null}
               url_checks={data.url_checks ?? []}
               explanation={data.explanation ?? ""}
             />
-          )}
+          ) : null}
 
           {/* Actions */}
           <div className="card" style={{ padding: "18px 22px", display: "flex", gap: 12, flexWrap: "wrap" }}>

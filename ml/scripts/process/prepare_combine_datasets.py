@@ -217,3 +217,10 @@ print(f"\nSource breakdown:")
 for src, cnt in sorted(stats["sources"].items(), key=lambda x: -x[1]):
     print(f"  {cnt:>7}  {src}")
 print("\n── Ready for train_finetune_model.py ──")
+
+# FraudShield curated Indian banking dataset
+p = f"{RAW}/indian-banking/fraudshield_curated.csv"
+if os.path.exists(p):
+    df = load(p, "text", "label", source="fraudshield_curated")
+    if df is not None:
+        frames.append(df)

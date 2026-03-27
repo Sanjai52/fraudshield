@@ -3,25 +3,59 @@
 import { useState } from "react";
 import Nav from "@/components/Nav";
 import { analyseText, analyseUrl } from "@/lib/api";
-import type { AnalysisResult } from "@/lib/types";
-import ResultCard from "@/components/ResultCard";
+import type { AnalysisResult, DisplayVerdict } from "@/lib/types";
 import Spinner from "@/components/Spinner";
 
 type Tab = "text" | "url" | "image" | "voice";
 
 const tabs: { key: Tab; label: string; icon: string }[] = [
-  { key: "text", label: "Message / SMS", icon: "💬" },
-  { key: "url", label: "URL", icon: "🔗" },
-  { key: "image", label: "Screenshot", icon: "🖼️" },
-  { key: "voice", label: "Voice Note", icon: "🎤" },
+  { key: "text",  label: "Message / SMS", icon: "💬" },
+  { key: "url",   label: "URL",           icon: "🔗" },
+  { key: "image", label: "Screenshot",    icon: "🖼️" },
+  { key: "voice", label: "Voice Note",    icon: "🎤" },
 ];
 
+// ── Verdict card colours ──────────────────────────────────────────────────────
+function getVerdictStyle(verdict: DisplayVerdict) {
+  const isDark = typeof window !== "undefined" &&
+    document.documentElement.classList.contains("dark");
+
+  if (verdict === "HIGH_FRAUD") {
+    return {
+      icon:   "✕",
+      label:  "Dangerous — Likely Scam",
+      color:  isDark ? "#f87171" : "#b91c1c",
+      bg:     isDark ? "#1f1111" : "#fef2f2",   // 🔥 darker red bg
+      border: isDark ? "#7f1d1d" : "#fecaca",
+      bar:    "#ef4444",
+    };
+  } else if (verdict === "SUSPICIOUS") {
+    return {
+      icon:   "⚠",
+      label:  "Suspicious",
+      color:  isDark ? "#fbbf24" : "#b45309",
+      bg:     isDark ? "#1f1a0a" : "#fffbeb",   // 🔥 darker yellow bg
+      border: isDark ? "#78350f" : "#fde68a",
+      bar:    "#f59e0b",
+    };
+  } else {
+    return {
+      icon:   "✓",
+      label:  "Safe",
+      color:  isDark ? "#4ade80" : "#16a34a",
+      bg:     isDark ? "#0f1f17" : "#f0fdf4",   // 🔥 darker green bg
+      border: isDark ? "#14532d" : "#bbf7d0",
+      bar:    "#22c55e",
+    };
+  }
+}
+
 export default function AnalysePage() {
-  const [tab, setTab] = useState<Tab>("text");
-  const [input, setInput] = useState("");
+  const [tab, setTab]         = useState<Tab>("text");
+  const [input, setInput]     = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult]   = useState<AnalysisResult | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
   const handleAnalyse = async () => {
     if (!input.trim()) return;
@@ -37,6 +71,11 @@ export default function AnalysePage() {
       setLoading(false);
     }
   };
+
+  // ── Use backend-computed verdict & confidence directly ────────────────────
+  const verdict = result?.display_verdict ?? null;
+  const style   = verdict ? getVerdictStyle(verdict) : null;
+  const pct     = result  ? Math.round(result.confidence * 100) : 0;
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
@@ -123,10 +162,95 @@ export default function AnalysePage() {
           </div>
         )}
 
-        {/* Result */}
-        {result && (
-          <div className="mt-6">
-            <ResultCard result={result} />
+        {/* ── Result card ── */}
+        {result && verdict && style && (
+          <div
+            className="mt-6 rounded-2xl p-6 space-y-5"
+            style={{
+              background: style.bg,
+              border:     `1px solid ${style.border}`,
+              boxShadow:  "var(--shadow-card)",
+            }}
+          >
+            {/* Verdict header */}
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-bold" style={{ color: style.color }}>
+                {style.icon}
+              </span>
+              <div className="flex-1">
+                <p className="text-lg font-bold" style={{ color: style.color }}>{style.label}</p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                  Confidence: {pct}%
+                </p>
+              </div>
+              {/* Confidence bar */}
+              <div className="w-24">
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${pct}%`, background: style.bar }}
+                  />
+                </div>
+                <p className="text-[10px] mt-1 text-right" style={{ color: "var(--text-muted)" }}>{pct}%</p>
+              </div>
+            </div>
+
+            {/* Explanation */}
+            {result.explanation && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: "var(--text-muted)" }}>
+                  {verdict === "LEGITIMATE" ? "Analysis summary" : "Why we flagged this"}
+                </p>
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text-primary)" }}>
+                  {result.explanation}
+                </p>
+              </div>
+            )}
+
+            {/* Signals — only for SUSPICIOUS / HIGH_FRAUD */}
+            {verdict !== "LEGITIMATE" && result.signals && result.signals.length > 0 && (
+              <div>
+                <p className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: "var(--text-muted)" }}>
+                  Red flags
+                </p>
+                <ul className="space-y-1.5">
+                  {result.signals.map((signal, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm" style={{ color: "var(--text-primary)" }}>
+                      <span className="mt-0.5 flex-shrink-0" style={{ color: style.color }}>•</span>
+                      {signal}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Action */}
+            {result.action && (
+              <div className="pt-4" style={{ borderTop: `1px solid ${style.border}` }}>
+                <p className="text-[10px] uppercase tracking-wider mb-2 font-semibold" style={{ color: "var(--text-muted)" }}>
+                  What to do
+                </p>
+                <p className="text-sm leading-relaxed" style={{ color: "var(--text-primary)" }}>
+                  {result.action}
+                </p>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-2 pt-1">
+              <button
+                className="flex-1 py-2 rounded-xl text-sm transition"
+                style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+              >
+                Share result
+              </button>
+              <button
+                className="flex-1 py-2 rounded-xl text-sm transition"
+                style={{ background: "var(--bg)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+              >
+                Report false positive
+              </button>
+            </div>
           </div>
         )}
       </div>

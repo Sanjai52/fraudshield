@@ -43,7 +43,7 @@ LEGITIMATE_PATTERNS = [
     "thank you for banking", "your account ending", "a/c *", "acct *",
     # Debit/credit card transaction notifications
     "debit card ending", "credit card ending", "card ending",
-    "has been used for", "used for rs", "used for ₹",
+    "has been used for", "used for rs", "used for \u20b9",
     "has been debited", "has been credited",
 ]
 
@@ -52,21 +52,28 @@ SIGNAL_PATTERNS = {
     "urgency_pressure": [
         "blocked", "suspended", "immediately", "urgent", "freeze",
         "within 24", "final", "warning", "expire",
-        "band ho", "turant", "abhi"
+        "band ho", "turant", "abhi", "temporarily limited",
+        "limited", "restore access", "account will be"
     ],
     "credential_harvest": [
         "verify", "update kyc", "kyc", "confirm", "login",
-        "enter", "submit", "click here", "validate", "re-verify"
+        "enter", "submit", "click here", "validate", "re-verify",
+        "verify your details", "details to restore"
     ],
     "threat_language": [
         "permanently closed", "legal action", "police", "arrest",
-        "penalty", "fine", "blocked permanently", "account will be"
+        "penalty", "fine", "blocked permanently", "account will be",
+        "will be permanently closed", "permanently closed within"
     ],
     "fake_domain_hint": [
         "-kyc", "-secure", "-verify", "-block", "-alert",
-        ".net", ".co", ".xyz", ".info", "kyc.net", "secure.co"
+        ".net", ".co", ".xyz", ".info", "kyc.net", "secure.co",
+        "sbi-verify", "sbi-kyc", "bank-verify", "account-verify"
     ],
 }
+
+# Signals that are strong indicators of fraud (2+ = escalate)
+STRONG_FRAUD_SIGNALS = {"urgency_pressure", "credential_harvest", "threat_language", "fake_domain_hint"}
 
 
 def _detect_signals(text: str) -> List[str]:
@@ -106,7 +113,9 @@ def _should_override_to_legitimate(
       - sender is verified OR message matches known legitimate patterns
     """
     if fraud_probability >= OVERRIDE_THRESHOLD:
-        return False  # model is fairly confident — respect it
+        return False
+    if fraud_probability < THRESHOLD_MODERATE:
+        return False
 
     has_fraud_signals = len(signals) > 0
     has_bad_urls      = any(uc["verdict"] in ("MALICIOUS", "SUSPICIOUS") for uc in url_checks)
@@ -114,9 +123,39 @@ def _should_override_to_legitimate(
     looks_legit       = _looks_legitimate(text)
 
     if has_fraud_signals or has_bad_urls:
-        return False  # real red flags present — don't override
+        return False
 
     return sender_verified or looks_legit
+
+
+def _signal_based_verdict(
+    signals: List[str],
+    fraud_probability: float,
+    current_display: str,
+) -> Optional[str]:
+    """
+    If the model is weak but keyword signals are strong, escalate the verdict.
+    Returns a new display verdict string, or None if no escalation needed.
+    """
+    signal_set  = set(signals)
+    strong_hits = len(signal_set & STRONG_FRAUD_SIGNALS)
+
+    # 3+ strong signals -> HIGH_FRAUD regardless of model
+    if strong_hits >= 3:
+        return "HIGH_FRAUD"
+
+    # 2+ strong signals -> at minimum SUSPICIOUS; escalate to HIGH_FRAUD if already SUSPICIOUS with high fp
+    if strong_hits >= 2:
+        if current_display == "LEGITIMATE":
+            return "SUSPICIOUS"
+        if current_display == "SUSPICIOUS" and fraud_probability >= 0.70:
+            return "HIGH_FRAUD"
+
+    # 1 strong signal + moderate model confidence -> SUSPICIOUS
+    if strong_hits >= 1 and fraud_probability >= 0.35 and current_display == "LEGITIMATE":
+        return "SUSPICIOUS"
+
+    return None  # no escalation needed
 
 
 def _build_explanation(
@@ -126,6 +165,7 @@ def _build_explanation(
     sender_check: Optional[dict],
     url_checks: List[dict],
     overridden: bool,
+    fraud_probability: float,
 ) -> str:
     """Construct a plain-language explanation from all evidence."""
     parts = []
@@ -166,26 +206,33 @@ def _build_explanation(
                     f"security engines on VirusTotal."
                 )
 
-    # Model evidence — keyed off display_verdict so explanation always matches UI
     if display_verdict == "HIGH_FRAUD":
         parts.append(
-            f"Message content strongly matches fraud patterns. "
-            f"Model confidence: {round(confidence * 100)}%."
+            f"This message exhibits strong characteristics of a phishing or fraud attempt "
+            f"(model confidence: {round(fraud_probability * 100)}%)."
         )
         if "urgency_pressure" in signals:
             parts.append("Uses urgency or threat language to pressure you into acting fast.")
         if "credential_harvest" in signals:
             parts.append("Attempts to collect your credentials or personal information.")
+        if "threat_language" in signals:
+            parts.append("Contains threatening language such as legal action or permanent account closure.")
+        if "fake_domain_hint" in signals:
+            parts.append("Contains a suspicious domain pattern commonly used in phishing links.")
 
     elif display_verdict == "SUSPICIOUS":
-        if not parts:
-            parts.append(
-                f"Message shows some patterns that overlap with fraud, "
-                f"but evidence is not conclusive. "
-                f"Model confidence: {round(confidence * 100)}%."
-            )
+        suspicious_summary = (
+            f"This message shows partial fraud patterns — urgency pressure or requests to verify details "
+            f"are common tactics in scam messages (model score: {round(fraud_probability * 100)}%). "
+            f"Evidence is not conclusive enough to confirm a scam, but caution is strongly advised."
+        )
+        parts.insert(0, suspicious_summary)
         if "urgency_pressure" in signals:
             parts.append("Contains urgency language — verify independently before acting.")
+        if "credential_harvest" in signals:
+            parts.append("Asks you to verify, confirm, or submit information — a common fraud tactic.")
+        if "fake_domain_hint" in signals:
+            parts.append("Contains a domain pattern that resembles known phishing sites.")
 
     else:  # LEGITIMATE
         if overridden:
@@ -195,8 +242,9 @@ def _build_explanation(
             )
         elif not parts:
             parts.append(
-                f"No fraud patterns detected. "
-                f"Model confidence: {round(confidence * 100)}%."
+                f"No suspicious patterns detected. "
+                f"The message does not match known scam signatures "
+                f"(model confidence: {round((1 - fraud_probability) * 100)}% legitimate)."
             )
 
     return " ".join(parts) if parts else "Analysis complete."
@@ -214,14 +262,6 @@ def _verdict_label(verdict: str, fraud_probability: float) -> str:
 def run(text: str, lang: str = "en") -> dict:
     """
     Run the full text analysis pipeline.
-
-    Args:
-        text: PII-stripped message text
-        lang: language code (en / hi / ta / te)
-
-    Returns:
-        Full structured analysis result including
-        model verdict, sender check, and URL checks.
     """
     if not text or not text.strip():
         return {
@@ -240,48 +280,51 @@ def run(text: str, lang: str = "en") -> dict:
 
     text = text.strip()
 
-    # ── 1. Model inference ────────────────────────────────────
+    # 1. Model inference
     result = predict(text)
 
-    # ── 2. Keyword signals ────────────────────────────────────
+    # 2. Keyword signals
     signals = _detect_signals(text)
 
-    # ── 3. Sender ID check ────────────────────────────────────
+    # 3. Sender ID check
     sender_check = check_sender_from_text(text)
     if sender_check and sender_check["status"] == "known_fake":
         if "fake_sender_id" not in signals:
             signals.append("fake_sender_id")
 
-    # ── 4. URL checks ─────────────────────────────────────────
+    # 4. URL checks
     urls       = extract_urls(text)
-    url_checks = [check_url(u) for u in urls[:2]]  # max 2 URLs per message
+    url_checks = [check_url(u) for u in urls[:2]]
     if any(uc["verdict"] in ("MALICIOUS", "SUSPICIOUS") for uc in url_checks):
         if "malicious_url" not in signals:
             signals.append("malicious_url")
 
-    # ── 5. Display verdict ────────────────────────────────────
+    # 5. Display verdict
     display    = _verdict_label(result["verdict"], result["fraud_probability"])
     overridden = False
 
-    # Hard override: transaction notification patterns are NEVER fraud,
-    # regardless of model confidence — unless there are real red flags.
-    has_fraud_signals = len(signals) > 0
-    has_bad_urls      = any(uc["verdict"] in ("MALICIOUS", "SUSPICIOUS") for uc in url_checks)
-    sender_is_fake    = sender_check and sender_check.get("status") == "known_fake"
+    has_bad_urls   = any(uc["verdict"] in ("MALICIOUS", "SUSPICIOUS") for uc in url_checks)
+    sender_is_fake = sender_check and sender_check.get("status") == "known_fake"
 
+    # Hard override: definite transaction notifications are NEVER fraud
     if (
         display in ("SUSPICIOUS", "HIGH_FRAUD")
         and _is_definitely_legitimate(text)
-        and not has_fraud_signals
         and not has_bad_urls
         and not sender_is_fake
     ):
         display    = "LEGITIMATE"
         overridden = True
 
-    # Upgrade to HIGH_FRAUD if sender is a known fake even if model is moderate
+    # Upgrade to HIGH_FRAUD if sender is known fake
     elif display == "SUSPICIOUS" and sender_is_fake:
         display = "HIGH_FRAUD"
+
+    # 5b. Signal-based escalation — fires when model is weak but signals are strong
+    elif not overridden:
+        escalated = _signal_based_verdict(signals, result["fraud_probability"], display)
+        if escalated:
+            display = escalated
 
     # Downgrade weak FRAUD to LEGITIMATE if no supporting evidence
     elif display == "SUSPICIOUS" and _should_override_to_legitimate(
@@ -290,7 +333,7 @@ def run(text: str, lang: str = "en") -> dict:
         display    = "LEGITIMATE"
         overridden = True
 
-    # ── 6. Explanation ────────────────────────────────────────
+    # 6. Explanation
     explanation = _build_explanation(
         display,
         result["confidence"],
@@ -298,17 +341,23 @@ def run(text: str, lang: str = "en") -> dict:
         sender_check,
         url_checks,
         overridden,
+        result["fraud_probability"],
     )
 
-    # ── 7. Action step ────────────────────────────────────────
+    # 7. Action step
     helpline = (
         sender_check["helpline"]
         if sender_check and sender_check.get("helpline")
         else "1930"
     )
-    if display in ("HIGH_FRAUD", "SUSPICIOUS"):
+    if display == "HIGH_FRAUD":
         action = (
             f"Do NOT click any links or share any information. "
+            f"Report this to cybercrime.gov.in or call the National Cyber Crime helpline: {helpline}."
+        )
+    elif display == "SUSPICIOUS":
+        action = (
+            f"Proceed with caution. Verify the sender through official channels before responding. "
             f"Call your bank's fraud helpline: {helpline}."
         )
     else:

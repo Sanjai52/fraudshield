@@ -3,6 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { analyseText, analyseUrl } from "@/lib/api";
+import type { DisplayVerdict } from "@/lib/types";
 
 type Tab = "text" | "url" | "screenshot" | "voice";
 
@@ -32,23 +33,54 @@ export default function Analyser() {
         data = await analyseText(message.trim());
         data._input = message.trim();
         data._tab   = "text";
+
+        // ── Safety net: re-derive display_verdict client-side ──────────────
+        // The backend is authoritative, but if its model is weak and signals
+        // are present, we escalate to match what the keyword signals suggest.
+        const fp         = (data.fraud_probability as number) ?? 0;
+        const signals    = (data.signals as string[]) ?? [];
+        const STRONG     = new Set(["urgency_pressure", "credential_harvest", "threat_language", "fake_domain_hint"]);
+        const strongHits = signals.filter(s => STRONG.has(s)).length;
+
+        // Only escalate if backend returned LEGITIMATE but signals say otherwise
+        if (data.display_verdict === "LEGITIMATE") {
+          if (strongHits >= 3) {
+            data.display_verdict = "HIGH_FRAUD" as DisplayVerdict;
+          } else if (strongHits >= 2) {
+            data.display_verdict = "SUSPICIOUS" as DisplayVerdict;
+          } else if (strongHits >= 1 && fp >= 0.35) {
+            data.display_verdict = "SUSPICIOUS" as DisplayVerdict;
+          }
+        }
+
+        // Final fallback: if display_verdict is somehow missing
+        if (!data.display_verdict) {
+          data.display_verdict = (
+            fp >= 0.80 ? "HIGH_FRAUD" :
+            fp >= 0.50 ? "SUSPICIOUS" :
+            "LEGITIMATE"
+          ) as DisplayVerdict;
+        }
+
       } else if (tab === "url") {
         data = await analyseUrl(url.trim());
         data._input = url.trim();
         data._tab   = "url";
-        // Normalise URL result to match text result shape for VerdictBanner
         data.display_verdict = data.verdict === "MALICIOUS" ? "HIGH_FRAUD"
                              : data.verdict === "SUSPICIOUS" ? "SUSPICIOUS"
                              : "LEGITIMATE";
         data.confidence = data.evidence_count > 0 ? 0.9 : 0.5;
       } else if (tab === "screenshot") {
-        // OCR + analyse — not yet implemented in backend, show friendly message
         throw new Error("Screenshot analysis is coming soon! For now, copy the text from the image and use the Text tab.");
       } else if (tab === "voice") {
         throw new Error("Voice analysis is coming soon! For now, transcribe the message and use the Text tab.");
       }
-      localStorage.removeItem("fraud_result");  // clear any stale result first
-      localStorage.setItem("fraud_result", JSON.stringify(data));
+
+      localStorage.removeItem("fraud_result");
+      localStorage.setItem("fraud_result", JSON.stringify({
+        ...data,
+        timestamp: Date.now(),
+      }));
       router.push("/result");
     } catch (err: any) {
       setError(err.message ?? "Something went wrong. Make sure the API server is running.");
@@ -193,9 +225,9 @@ export default function Analyser() {
           </>
         ) : (
           tab === "text"       ? "Analyse message →" :
-        tab === "url"        ? "Check URL →" :
-        tab === "screenshot" ? "Analyse screenshot →" :
-        "Analyse voice note →"
+          tab === "url"        ? "Check URL →" :
+          tab === "screenshot" ? "Analyse screenshot →" :
+          "Analyse voice note →"
         )}
       </button>
 

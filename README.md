@@ -1,194 +1,116 @@
-# 🚨 FraudShield
+<div>
 
-**Detect scams before you click.**
+# FraudShield
 
-FraudShield is an AI-powered fraud detection platform that helps users identify whether an SMS, WhatsApp message, email, URL, screenshot, or voice note is a scam — before they act on it.
+**AI That Sees Through Scams.**
 
----
+AI-powered fraud detection for SMS, WhatsApp messages, emails, and URLs, built for everyday users in India.
 
-## 📌 Overview
+[![Next.js](https://img.shields.io/badge/Next.js-14-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-MuRIL-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black)](https://huggingface.co/)
 
-FraudShield analyzes suspicious content using NLP, URL intelligence, OCR, and voice analysis to provide:
-
-- ✅ Clear verdict (SAFE / SUSPICIOUS / DANGEROUS)
-- 📊 Confidence score
-- 🔍 Detailed explanation (why it’s risky)
-- 🚫 Actionable advice (what to do next)
-
-Unlike traditional tools, FraudShield focuses on **message content + intent**, not just sender reputation.
-
----
-
-## ❗ Problem
-
-Modern scams have evolved:
-
-- AI-generated phishing messages are grammatically perfect  
-- Fake domains look legitimate (e.g., `sbi-kyc.net`)  
-- Messages use urgency, fear, and authority tactics  
-- Users are tricked before any transaction happens  
-
-**Gap:** No tool deeply analyzes suspicious messages and clearly explains fraud — especially within WhatsApp and SMS.
+</div>
 
 ---
 
-## 🎯 Target Users
+## What is FraudShield?
 
-### 👴 Primary Users (40–70 years)
-- Use WhatsApp daily  
-- Limited technical knowledge  
-- Need simple verdict + clear action  
-
-### 👨‍💻 Secondary Users (22–38 years)
-- Tech-savvy  
-- Help family detect scams  
-- Want detailed breakdown + shareable results  
+FraudShield analyzes suspicious messages and URLs using NLP and URL intelligence, returning a clear verdict (SAFE / SUSPICIOUS / DANGEROUS), a confidence score, an explanation of why it's risky, and actionable advice on what to do next.
 
 ---
 
-## 🏗️ What We Are Building
+## Project Structure
 
-### Phase 1 — Website
-- Paste or upload suspicious content  
-- Get full fraud analysis with explanation  
-- Save history and share results  
-
-### Phase 2 — WhatsApp Bot
-- Forward suspicious messages directly  
-- Get instant fraud verdict  
-- No app installation required  
-
----
-
-## 🔍 Features
-
-### 🧠 AI Fraud Detection
-- NLP-based classification (BERT / IndicBERT)  
-- Intent detection (threat, urgency, credential harvesting)  
-- Explainable AI with highlighted suspicious words  
-
-### 🌐 URL Analysis
-- WHOIS domain age check  
-- Google Safe Browsing  
-- VirusTotal + PhishTank integration  
-- Sandbox preview with screenshot  
-
-### 🖼️ Screenshot Analysis
-- OCR (Tesseract) extracts text  
-- Same fraud detection pipeline applied  
-
-### 🎤 Voice Analysis
-- MFCC feature extraction  
-- Detects synthetic / deepfake voices  
-
-### 🏦 Sender ID Verification
-- Checks against official bank sender IDs  
-- Flags spoofed senders  
-
-### 📊 Campaign Detection
-- Identifies repeated scam patterns  
-- Shows number of users affected  
-
----
-
-## 📱 Example Output
-
-🚨 HIGH RISK — This is a scam.
-
-• Sender "SBI-ALERT" is not registered to SBI  
-• Link leads to a fake login page  
-• Message uses urgency and credential harvesting  
-• 412 people reported this message  
-
-Do NOT act. Call SBI: 1800-11-2211
-
----
-
-## 🔐 Privacy First
-
-- ❌ No raw message text stored  
-- 🔒 Personally identifiable information (PII) removed before processing  
-- 📉 Only anonymized feature data stored  
-- 🗑️ URLs cached temporarily (24 hours)  
-- 🎤 Voice data processed in memory and deleted  
-
----
-
-## 🧱 Tech Stack
-
-Frontend: Next.js  
-Backend: Node.js + Express.js  
-AI Engine: Python + FastAPI  
-Database: Supabase (PostgreSQL)  
-NLP Models: HuggingFace (BERT / IndicBERT)  
-OCR: Tesseract  
-Voice: Librosa  
-URL Sandbox: Playwright  
-
----
-
-## 🏗️ Architecture
-
-User → Frontend / Bot → Node.js Middleware → Python AI Engine → Database
-
----
-
-## 📡 API Endpoints
-
-- POST /analyse/text  
-- POST /analyse/url  
-- POST /analyse/image  
-- POST /analyse/voice  
-- POST /feedback  
-- GET /stats/public  
-
----
-
-## 📊 Success Metrics
-
-- >90% accuracy  
-- <3% false positives  
-- <3s response time  
-
----
-
-## ⚠️ Risks
-
-- False positives  
-- Evolving fraud tactics  
-- Limited datasets  
-
----
-
-## 🚀 Future Scope
-
-- More languages  
-- Better voice detection  
-- Real-time alerts  
-
----
-
-## 📂 Project Structure
-
+```
 fraudshield/
 ├── apps/
+│   └── web/                   # Next.js 14 frontend (TypeScript + Tailwind)
 ├── services/
-└── supabase/
+│   ├── ai/                    # Python FastAPI AI engine
+│   │   ├── main.py
+│   │   ├── pipelines/         # text_pipeline, url_pipeline
+│   │   ├── evidence/          # sender_ids, url_checks
+│   │   ├── models/
+│   │   └── requirements.txt
+│   └── api/                   # Node.js middleware
+├── ml/                        # ML scripts and dataset preparation
+└── supabase/                  # DB schema and config
+```
 
 ---
 
-## 🌟 Vision
+## Running Locally
 
-Stop scams before users lose money.
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- npm
+
+### 1. AI Engine (FastAPI — Port 8000)
+
+```bash
+cd services/ai
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+API docs → http://127.0.0.1:8000/docs  
+Health check → http://127.0.0.1:8000/health
+
+### 2. Frontend (Next.js — Port 3000)
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+Open → http://localhost:3000
+
+### Run Both Together
+
+**Terminal 1 — AI Engine:**
+```bash
+cd services/ai && uvicorn main:app --reload --port 8000
+```
+
+**Terminal 2 — Frontend:**
+```bash
+cd apps/web && npm run dev
+```
 
 ---
 
-## 📅 Status
+## API Endpoints
 
-Student Project — 2026
+| Method | Endpoint | Status |
+|--------|----------|--------|
+| GET | `/health` | Live |
+| GET | `/stats/public` | Live |
+| POST | `/analyse/text` | Live |
+| POST | `/analyse/url` | Live |
+| GET | `/sender-ids/{bank}` | Live |
+| POST | `/analyse/image` | Week 7 |
+| POST | `/analyse/voice` | Week 7 |
+| POST | `/feedback` | Week 5 |
+| POST | `/report` | Week 5 |
 
 ---
 
-## 📜 License
+## Tech Stack
 
-MIT License
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14, TypeScript, Tailwind CSS |
+| AI Engine | Python, FastAPI, Uvicorn |
+| NLP Model | `google/muril-base-cased` via HuggingFace |
+| URL Analysis | WHOIS, Google Safe Browsing, VirusTotal, PhishTank |
+| Database | Supabase (PostgreSQL) |
+| Middleware | Node.js + Express.js |
+
+---

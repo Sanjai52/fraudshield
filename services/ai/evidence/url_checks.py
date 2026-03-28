@@ -314,51 +314,152 @@ def _check_phishtank(url: str) -> dict:
     except Exception as e:
         return {"success": False, "hit": False, "error": str(e)}
 
+# ── Check 5: Domain Heuristics ────────────────────────────────
+
+# Official domains of Indian banks
+OFFICIAL_BANK_DOMAINS = {
+    "sbi.co.in", "onlinesbi.sbi", "sbionline.com",
+    "hdfcbank.com", "netbanking.hdfcbank.com",
+    "icicibank.com", "infinity.icicibank.com",
+    "axisbank.com", "netbanking.axisbank.com",
+    "kotak.com", "netbanking.kotak.com",
+    "pnbindia.in", "netpnb.com",
+    "bankofbaroda.in", "bobibanking.com",
+    "canarabank.com",
+    "unionbankofindia.co.in", "unionbankonline.co.in",
+    "paytmbank.com", "bank.paytm.com",
+    "rbi.org.in",
+    "npci.org.in",
+    "upi.org.in",
+    "bhimupi.org.in",
+}
+
+# TLDs almost never used by legitimate Indian banks
+SUSPICIOUS_TLDS = {
+    ".xyz", ".top", ".click", ".link", ".online",
+    ".site", ".info", ".biz", ".tk", ".ml", ".ga",
+    ".cf", ".gq", ".pw", ".cc", ".ws"
+}
+
+# Patterns that appear in fake bank domains
+FAKE_BANK_PATTERNS = [
+    "kyc", "update", "verify", "secure", "alert",
+    "block", "suspend", "unlock", "reactivate",
+    "reward", "cashback", "offer", "win", "prize",
+    "netbank", "ibanking", "mbanking",
+    "sbi-", "hdfc-", "icici-", "axis-", "paytm-",
+    "-sbi", "-hdfc", "-icici", "-axis",
+    "sbikyc", "hdfckyc", "icicikyc",
+]
+
+# Bank names in domain (possible impersonation)
+BANK_KEYWORDS = ["sbi", "hdfc", "icici", "axis", "kotak", "pnb", "bob",
+                 "canara", "union", "paytm", "rbi", "npci", "upi", "bhim"]
+
+
+def _check_domain_heuristics(url: str, domain: str) -> dict:
+    """
+    Pattern-based domain analysis — works even when external APIs fail.
+    Checks for typosquatting, fake bank domain patterns, suspicious TLDs.
+    No API key needed — instant result.
+    """
+    flags         = []
+    domain_lower  = domain.lower()
+    url_lower     = url.lower()
+
+    # Check 1 — is it an official bank domain?
+    # Strip www. prefix
+    clean_domain = domain_lower.removeprefix("www.")
+    if clean_domain in OFFICIAL_BANK_DOMAINS:
+        return {
+            "success":       True,
+            "suspicious":    False,
+            "flags":         [],
+            "is_official":   True,
+            "explanation":   f"{domain} is a verified official bank domain.",
+        }
+
+    # Check 2 — suspicious TLD
+    for tld in SUSPICIOUS_TLDS:
+        if domain_lower.endswith(tld):
+            flags.append(f"Suspicious TLD '{tld}' — not used by legitimate banks")
+            break
+
+    # Check 3 — fake bank patterns in domain
+    for pattern in FAKE_BANK_PATTERNS:
+        if pattern in domain_lower:
+            flags.append(f"Suspicious pattern '{pattern}' in domain")
+            break
+
+    # Check 4 — bank name + not official domain (impersonation attempt)
+    for bank in BANK_KEYWORDS:
+        if bank in domain_lower and clean_domain not in OFFICIAL_BANK_DOMAINS:
+            flags.append(f"Domain contains bank name '{bank.upper()}' but is not the official domain")
+            break
+
+    # Check 5 — too many hyphens (common in fake domains)
+    if domain_lower.count("-") >= 2:
+        flags.append("Domain contains multiple hyphens — common in fake bank domains")
+
+    # Check 6 — domain is an IP address
+    if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', domain_lower):
+        flags.append("URL uses an IP address instead of a domain name")
+
+    # Check 7 — very long domain (obfuscation)
+    if len(domain_lower) > 40:
+        flags.append(f"Unusually long domain ({len(domain_lower)} chars) — possible obfuscation")
+
+    # Check 8 — URL path contains sensitive keywords
+    path = url_lower.replace(domain_lower, "")
+    for kw in ["login", "signin", "verify", "kyc", "password", "otp", "credential"]:
+        if kw in path:
+            flags.append(f"URL path contains '{kw}' — possible credential harvesting page")
+            break
+
+    return {
+        "success":     True,
+        "suspicious":  len(flags) > 0,
+        "flags":       flags,
+        "is_official": False,
+        "explanation": "; ".join(flags) if flags else "No suspicious patterns detected in domain.",
+    }
 
 # ── Main check_url function ───────────────────────────────────
 
 def check_url(url: str) -> dict:
     """
-    Run all 4 checks on a URL and return combined evidence.
-
-    Args:
-        url: suspicious URL from message
-
-    Returns:
-        {
-            "url":                  str,
-            "domain":               str,
-            "domain_age_days":      int | None,
-            "registrar":            str | None,
-            "safebrowsing_hit":     bool,
-            "virustotal_score":     str,
-            "virustotal_malicious": int,
-            "phishtank_hit":        bool,
-            "verdict":              "MALICIOUS"|"SUSPICIOUS"|"CLEAN"|"UNKNOWN",
-            "evidence_count":       int,
-            "checks":               dict,
-        }
+    Run all checks on a URL and return combined evidence.
+    Checks run in parallel conceptually:
+      1. Domain heuristics (instant, no API)
+      2. WHOIS/RDAP (domain age)
+      3. Google Safe Browsing
+      4. VirusTotal
+      5. PhishTank
     """
-    domain = _extract_domain(url)
-    whois  = _check_whois(domain)
-    sb     = _check_safebrowsing(url)
-    vt     = _check_virustotal(url)
-    pt     = _check_phishtank(url)
+    domain     = _extract_domain(url)
+    heuristics = _check_domain_heuristics(url, domain)
+    whois_res  = _check_whois(domain)
+    sb         = _check_safebrowsing(url)
+    vt         = _check_virustotal(url)
+    pt         = _check_phishtank(url)
 
-    # Count how many checks flagged it
+    # Count flags — heuristics count as 1 flag total if suspicious
     flags = sum([
-        whois.get("suspicious", False),
+        heuristics.get("suspicious", False),
+        whois_res.get("suspicious", False),
         sb.get("hit", False),
         vt.get("suspicious", False),
         pt.get("hit", False),
     ])
 
-    # Overall verdict
-    if flags >= 3:
+    # If it's a confirmed official domain — always CLEAN
+    if heuristics.get("is_official"):
+        verdict = "CLEAN"
+    elif flags >= 3:
         verdict = "MALICIOUS"
     elif flags >= 1:
         verdict = "SUSPICIOUS"
-    elif all([whois["success"], sb["success"]]):
+    elif whois_res["success"] and sb["success"]:
         verdict = "CLEAN"
     else:
         verdict = "UNKNOWN"
@@ -366,9 +467,11 @@ def check_url(url: str) -> dict:
     return {
         "url":                   url,
         "domain":                domain,
-        "domain_age_days":       whois.get("age_days"),
-        "registrar":             whois.get("registrar"),
-        "domain_suspicious":     whois.get("suspicious", False),
+        "domain_age_days":       whois_res.get("age_days"),
+        "registrar":             whois_res.get("registrar"),
+        "domain_suspicious":     whois_res.get("suspicious", False),
+        "heuristic_flags":       heuristics.get("flags", []),
+        "heuristic_suspicious":  heuristics.get("suspicious", False),
         "safebrowsing_hit":      sb.get("hit", False),
         "virustotal_score":      vt.get("score", "unknown"),
         "virustotal_malicious":  vt.get("malicious", 0),
@@ -376,7 +479,8 @@ def check_url(url: str) -> dict:
         "verdict":               verdict,
         "evidence_count":        flags,
         "checks": {
-            "whois":        whois,
+            "heuristics":   heuristics,
+            "whois":        whois_res,
             "safebrowsing": sb,
             "virustotal":   vt,
             "phishtank":    pt,

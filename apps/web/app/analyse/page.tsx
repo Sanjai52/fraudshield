@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import Nav from "@/components/Nav";
+// import Nav from "@/components/Nav";
 import { analyseText, analyseUrl } from "@/lib/api";
 import type { AnalysisResult, DisplayVerdict } from "@/lib/types";
 import Spinner from "@/components/Spinner";
@@ -79,7 +79,7 @@ export default function AnalysePage() {
 
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
-      <Nav active="analyse" />
+      {/* <Nav active="analyse" /> */}
 
       <div className="max-w-4xl mx-auto px-8 py-12">
         {/* Header */}

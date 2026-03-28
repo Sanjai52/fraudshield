@@ -1,5 +1,5 @@
 import Link from "next/link";
-import Nav from "@/components/Nav";
+
 
 const features = [
   { icon: "🧠", title: "AI-powered NLP", desc: "BERT model trained on Indian scam patterns" },
@@ -20,7 +20,7 @@ const privacy = [
 export default function HomePage() {
   return (
     <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
-      <Nav />
+      {/* <Nav /> */}
 
       {/* Hero */}
       <section className="max-w-4xl mx-auto px-8 pt-24 pb-20">

@@ -253,8 +253,64 @@ export default function ResultPage() {
             </span>
           </div>
 
+          {/* Feedback */}
+          <FeedbackCard />
+
         </div>
       </div>
     </main>
+  );
+}
+function FeedbackCard() {
+  const [sent,    setSent]    = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  async function submit(correct: boolean) {
+    setLoading(true);
+    try {
+      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/feedback`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ analysis_id: null, user_says_correct: correct }),
+      });
+      setSent(true);
+    } catch { /* silent */ }
+    setLoading(false);
+  }
+
+  if (sent) return (
+    <div className="card" style={{ padding: "16px 20px", textAlign: "center", fontSize: 14, color: "var(--success)" }}>
+      ✅ Thank you — your feedback helps improve the model.
+    </div>
+  );
+
+  return (
+    <div className="card" style={{ padding: "16px 20px" }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+        Was this verdict correct?
+      </div>
+      <div style={{ display: "flex", gap: 10 }}>
+        <button
+          onClick={() => submit(true)}
+          disabled={loading}
+          className="btn-outline"
+          style={{ flex: 1, fontSize: 14, padding: "9px 0" }}
+        >
+          👍 Yes, correct
+        </button>
+        <button
+          onClick={() => submit(false)}
+          disabled={loading}
+          style={{
+            flex: 1, fontSize: 14, padding: "9px 0",
+            background: "var(--danger-bg)", color: "var(--danger)",
+            border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)",
+            cursor: "pointer", fontWeight: 500,
+          }}
+        >
+          👎 No, wrong verdict
+        </button>
+      </div>
+    </div>
   );
 }

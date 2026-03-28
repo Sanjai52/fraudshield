@@ -1,117 +1,302 @@
-import Link from "next/link";
-import Nav from "@/components/Nav";
-
-const HOW_IT_WORKS = [
-  { step: "01", title: "You submit content", desc: "Paste a message, URL, or upload a screenshot. We strip any personally identifiable information (PII) before it touches our models." },
-  { step: "02", title: "NLP + URL analysis", desc: "Our fine-tuned BERT model analyses intent, urgency, and credential-harvesting patterns. For URLs, we run WHOIS, VirusTotal, and Google Safe Browsing checks." },
-  { step: "03", title: "Verdict + explanation", desc: "You get a clear SAFE / SUSPICIOUS / DANGEROUS verdict with a confidence score and a plain-language explanation of what we found." },
-  { step: "04", title: "Anonymised signal stored", desc: "Only feature vectors (never raw message text) are stored. These feed campaign detection — showing how many others received the same scam." },
-];
-
-const PRIVACY_ITEMS = [
-  { icon: "❌", title: "No raw message text stored", desc: "We never save the original message you paste. Only anonymised feature vectors are retained." },
-  { icon: "🔒", title: "PII stripped before processing", desc: "Phone numbers, account numbers, and names are removed before any model sees your content." },
-  { icon: "🗑️", title: "URLs cached for 24 hours only", desc: "URL scan results are cached briefly to improve speed for repeated queries, then deleted." },
-  { icon: "🎤", title: "Voice processed in-memory", desc: "Audio is never written to disk. It is processed transiently and discarded immediately after analysis." },
-  { icon: "📊", title: "Aggregate stats only", desc: "Public stats are computed over anonymised data — never tied to individuals." },
-  { icon: "🚫", title: "No data sold or shared", desc: "Your data is never sold to third parties or used for advertising." },
-];
-
-const MODEL_DETAILS = [
-  { label: "Base model", value: "BERT / IndicBERT (HuggingFace)" },
-  { label: "Training data", value: "Indian bank SMS datasets, PhishTank, curated scam corpora" },
-  { label: "Target accuracy", value: "≥ 90% on held-out test set" },
-  { label: "False positive target", value: "< 3%" },
-  { label: "URL intelligence", value: "WHOIS · VirusTotal · Google Safe Browsing · PhishTank" },
-  { label: "OCR engine", value: "Tesseract (screenshots)" },
-  { label: "Voice analysis", value: "Librosa MFCC features" },
-];
+"use client";
+import { useEffect, useState } from "react";
 
 export default function TransparencyPage() {
-  return (
-    <div style={{ background: "var(--bg)", minHeight: "100vh" }}>
-      <Nav active="transparency" />
+  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-      <div className="max-w-4xl mx-auto px-8 py-12">
-        <div className="mb-12">
-          <p className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--accent)" }}>
-            Transparency
-          </p>
-          <h1 className="text-4xl font-bold mb-3" style={{ color: "var(--text-primary)" }}>
-            How FraudShield works
+  useEffect(() => {
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/stats/public`)
+      .then((r) => r.json())
+      .then((d) => {
+        setStats(d);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  return (
+    <main>
+      {/* 🔥 HERO */}
+      <section
+        style={{
+          background:
+            "radial-gradient(circle at 50% 0%, #2563eb15, transparent 60%)",
+          padding: "96px 24px 80px",
+          textAlign: "center",
+          borderBottom: "1px solid var(--border)",
+        }}
+      >
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <h1
+            style={{
+              fontSize: "clamp(32px, 5vw, 48px)",
+              fontWeight: 900,
+              letterSpacing: "-0.02em",
+              marginBottom: 16,
+            }}
+          >
+            Transparency Dashboard
           </h1>
-          <p className="text-base leading-relaxed max-w-lg" style={{ color: "var(--text-secondary)" }}>
-            We believe you should know exactly what happens to your data and how our models reach their conclusions.
+
+          <p
+            style={{
+              fontSize: 17,
+              color: "var(--muted)",
+              lineHeight: 1.75,
+              maxWidth: 640,
+              margin: "0 auto",
+            }}
+          >
+            FraudShield publishes its own accuracy metrics openly. No hidden
+            scores — full track record.
           </p>
         </div>
+      </section>
 
-        {/* Steps */}
-        <section className="mb-14">
-          <h2 className="text-base font-semibold mb-5" style={{ color: "var(--text-primary)" }}>Step by step</h2>
-          <div className="space-y-3">
-            {HOW_IT_WORKS.map(item => (
-              <div key={item.step} className="flex gap-5 rounded-2xl px-5 py-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
-                <span className="font-bold text-sm flex-shrink-0 mt-0.5 font-[family-name:var(--font-mono)]" style={{ color: "var(--accent)" }}>{item.step}</span>
-                <div>
-                  <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{item.title}</p>
-                  <p className="text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>{item.desc}</p>
+      {/* 🔥 MAIN CONTENT */}
+      <section style={{ padding: "0 24px 48px" }}>
+        <div
+          style={{
+            maxWidth: 1200,
+            margin: "0 auto",
+          }}
+        >
+          {/* 🔥 STATS (OVERLAP HERO) */}
+          <div
+            style={{
+              marginTop: -50,
+              marginBottom: 40,
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 16,
+            }}
+          >
+            {[
+              {
+                label: "Total analyses",
+                val: loading
+                  ? "—"
+                  : (stats?.total_analyses ?? 0).toLocaleString(),
+              },
+              {
+                label: "Fraud detected",
+                val: loading
+                  ? "—"
+                  : (stats?.fraud_detected ?? 0).toLocaleString(),
+              },
+              {
+                label: "False positive rate",
+                val: loading
+                  ? "—"
+                  : `${((stats?.false_positive_rate ?? 0) * 100).toFixed(
+                      2
+                    )}%`,
+              },
+              {
+                label: "Model F1 score",
+                val: loading
+                  ? "—"
+                  : `${((stats?.model_f1 ?? 0) * 100).toFixed(1)}%`,
+              },
+              {
+                label: "Model version",
+                val: loading ? "—" : stats?.model_version ?? "v1",
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="card"
+                style={{
+                  padding: "22px",
+                  textAlign: "center",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 30,
+                    fontWeight: 900,
+                    letterSpacing: "-0.02em",
+                  }}
+                >
+                  {s.val}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "var(--muted)",
+                    marginTop: 6,
+                  }}
+                >
+                  {s.label}
                 </div>
               </div>
             ))}
           </div>
-        </section>
 
-        {/* Privacy */}
-        <section className="mb-14">
-          <h2 className="text-base font-semibold mb-5" style={{ color: "var(--text-primary)" }}>Privacy commitments</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {PRIVACY_ITEMS.map(item => (
-              <div key={item.title} className="rounded-2xl p-4" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
-                <span className="text-xl">{item.icon}</span>
-                <p className="text-sm font-semibold mt-2 mb-1" style={{ color: "var(--text-primary)" }}>{item.title}</p>
-                <p className="text-xs leading-relaxed" style={{ color: "var(--text-muted)" }}>{item.desc}</p>
+          {/* 🔥 2 COLUMN LAYOUT */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "2fr 1fr",
+              gap: 24,
+            }}
+          >
+            {/* LEFT */}
+            <div>
+              {/* MODEL CARD */}
+              <div className="card" style={{ padding: 28, marginBottom: 24 }}>
+                <h2
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 800,
+                    marginBottom: 20,
+                  }}
+                >
+                  Model — muril-fraud-v1
+                </h2>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 16,
+                  }}
+                >
+                  {[
+                    { label: "Base model", val: "google/muril-base-cased" },
+                    { label: "Training samples", val: "108,891" },
+                    { label: "Validation F1", val: "0.9733" },
+                    { label: "False positive rate", val: "1.13%" },
+                    { label: "Languages", val: "English, Hindi" },
+                    { label: "Trained on", val: "Google Colab T4 GPU" },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      style={{
+                        padding: "12px 16px",
+                        background: "var(--subtle)",
+                        borderRadius: "var(--radius-sm)",
+                        border: "1px solid var(--border)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--muted)",
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          marginBottom: 4,
+                        }}
+                      >
+                        {item.label}
+                      </div>
+                      <div style={{ fontSize: 15, fontWeight: 700 }}>
+                        {item.val}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-        </section>
 
-        {/* Model details */}
-        <section className="mb-14">
-          <h2 className="text-base font-semibold mb-5" style={{ color: "var(--text-primary)" }}>Model & technology</h2>
-          <div className="rounded-2xl overflow-hidden" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            {MODEL_DETAILS.map((row, i) => (
-              <div key={row.label} className="flex gap-4 px-5 py-3.5 text-sm" style={{ borderBottom: i !== MODEL_DETAILS.length - 1 ? "1px solid var(--border)" : "none" }}>
-                <span className="flex-shrink-0 w-40" style={{ color: "var(--text-muted)" }}>{row.label}</span>
-                <span style={{ color: "var(--text-primary)" }}>{row.value}</span>
+              {/* 🔥 SIMPLE VISUAL (CHART PLACEHOLDER) */}
+              <div className="card" style={{ padding: 24 }}>
+                <h3 style={{ fontWeight: 700, marginBottom: 12 }}>
+                  Detection Trend
+                </h3>
+
+                <div
+                  style={{
+                    height: 120,
+                    borderRadius: 8,
+                    background:
+                      "linear-gradient(90deg, #2563eb20, transparent)",
+                  }}
+                />
               </div>
-            ))}
-          </div>
-        </section>
+            </div>
 
-        {/* Limitations */}
-        <section className="mb-12">
-          <h2 className="text-base font-semibold mb-5" style={{ color: "var(--text-primary)" }}>Known limitations</h2>
-          <div className="rounded-2xl px-5 py-4 space-y-3" style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}>
-            {[
-              "False positives are possible (~3%). Always apply your own judgment.",
-              "Scam tactics evolve rapidly. Our models are updated periodically but may lag new attack patterns.",
-              "Non-English and non-Indian-language content has lower accuracy.",
-              "Voice deepfake detection is experimental and less reliable than text/URL analysis.",
-            ].map((lim, i) => (
-              <div key={i} className="flex items-start gap-2 text-sm" style={{ color: "var(--text-secondary)" }}>
-                <span className="mt-0.5 flex-shrink-0">⚠️</span>
-                {lim}
+            {/* RIGHT */}
+            <div>
+              <div className="card" style={{ padding: 28 }}>
+                <h2
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 800,
+                    marginBottom: 16,
+                  }}
+                >
+                  Evidence Layers
+                </h2>
+
+                {[
+                  {
+                    icon: "🤖",
+                    name: "MuRIL AI Model",
+                    detail:
+                      "Fine-tuned transformer — 97.33% F1 on test samples",
+                  },
+                  {
+                    icon: "📵",
+                    name: "Sender ID Database",
+                    detail:
+                      "12 banks + RBI + NPCI — verified sources",
+                  },
+                  {
+                    icon: "🔍",
+                    name: "Domain Heuristics",
+                    detail:
+                      "Fake bank names, typosquatting detection",
+                  },
+                  {
+                    icon: "🌐",
+                    name: "Google Safe Browsing",
+                    detail:
+                      "10,000 checks/day phishing detection",
+                  },
+                  {
+                    icon: "🔬",
+                    name: "VirusTotal",
+                    detail: "70+ engines scan",
+                  },
+                  {
+                    icon: "🎣",
+                    name: "PhishTank",
+                    detail: "Community phishing database",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.name}
+                    style={{
+                      display: "flex",
+                      gap: 14,
+                      padding: "12px 0",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    <span style={{ fontSize: 20 }}>{item.icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>
+                        {item.name}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: "var(--muted)",
+                          marginTop: 2,
+                        }}
+                      >
+                        {item.detail}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
-        </section>
-
-        <div className="text-center">
-          <Link href="/analyse" className="inline-block font-semibold px-7 py-3 rounded-xl text-sm transition" style={{ background: "var(--accent)", color: "#fff" }}>
-            Try it yourself →
-          </Link>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

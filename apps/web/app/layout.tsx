@@ -3,7 +3,7 @@ import { DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import Nav from "@/components/Nav";
-// import NavbarClient from "@/components/NavbarClient";
+import ChatBot from "@/components/ChatBot";
 
 const dmSans = DM_Sans({
   subsets:  ["latin"],
@@ -29,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {/* <NavbarClient /> */}
         <Nav/>
         {children}
+        <ChatBot/>
         <Footer />
       </body>
     </html>

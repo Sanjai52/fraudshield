@@ -3,86 +3,149 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getUserAnalyses, getUserStats } from "@/lib/db";
+
+const VERDICT_COLOR: Record<string, string> = {
+  FRAUD:      "var(--danger)",
+  LEGITIMATE: "var(--success)",
+  ERROR:      "var(--muted)",
+};
+const VERDICT_BG: Record<string, string> = {
+  FRAUD:      "var(--danger-bg)",
+  LEGITIMATE: "var(--success-bg)",
+  ERROR:      "var(--subtle)",
+};
+const VERDICT_EMOJI: Record<string, string> = {
+  FRAUD:      "🚨",
+  LEGITIMATE: "✅",
+  ERROR:      "❓",
+};
+
+function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div className="card dash-stat-card">
+      <div className="dash-stat-value">{value}</div>
+      <div className="dash-stat-label">{label}</div>
+      {sub && <div className="dash-stat-sub">{sub}</div>}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [analyses, setAnalyses] = useState<any[]>([]);
+  const [stats,    setStats]    = useState({ total: 0, fraud: 0, safe: 0, thisMonth: 0 });
   const [user,     setUser]     = useState<any>(null);
   const [loading,  setLoading]  = useState(true);
+  const [filter,   setFilter]   = useState<"ALL" | "FRAUD" | "LEGITIMATE">("ALL");
   const router = useRouter();
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) { router.push("/login"); return; }
       setUser(data.user);
-      supabase
-        .from("analyses")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(50)
-        .then(({ data: rows }) => {
-          setAnalyses(rows ?? []);
-          setLoading(false);
-        });
+      const [rows, s] = await Promise.all([
+        getUserAnalyses(data.user.id, 100),
+        getUserStats(data.user.id),
+      ]);
+      setAnalyses(rows);
+      setStats(s);
+      setLoading(false);
     });
   }, []);
 
-  const verdictColor = (v: string) =>
-    v === "FRAUD" ? "var(--danger)" : v === "LEGITIMATE" ? "var(--success)" : "var(--warning)";
-
-  const verdictEmoji = (v: string) =>
-    v === "FRAUD" ? "🚨" : v === "LEGITIMATE" ? "✅" : "⚠️";
+  const filtered = filter === "ALL" ? analyses : analyses.filter(r => r.verdict === filter);
 
   if (loading) return (
-    <div style={{ maxWidth: 720, margin: "80px auto", textAlign: "center" }}>
-      <p style={{ color: "var(--muted)" }}>Loading your analyses...</p>
+    <div className="dash-loading">
+      <div className="dash-spinner" />
+      <p>Loading your dashboard…</p>
     </div>
   );
 
   return (
-    <main style={{ background: "var(--subtle)", minHeight: "calc(100vh - 64px)", padding: "48px 24px" }}>
-      <div style={{ maxWidth: 760, margin: "0 auto" }}>
-        <div style={{ marginBottom: 32 }}>
-          <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: "-0.02em", marginBottom: 6 }}>
-            My Analyses
-          </h1>
-          <p style={{ color: "var(--muted)", fontSize: 15 }}>
-            {analyses.length} check{analyses.length !== 1 ? "s" : ""} saved to your account
-          </p>
+    <main className="dash-main">
+      <div className="dash-container">
+
+        {/* Header */}
+        <div className="dash-header">
+          <div>
+            <h1 className="dash-title">Dashboard</h1>
+            <p className="dash-subtitle">
+              Welcome back, {user?.user_metadata?.full_name || user?.email?.split("@")[0]}
+            </p>
+          </div>
+          <Link href="/analyse" className="btn-primary">
+            + New analysis
+          </Link>
         </div>
 
-        {analyses.length === 0 ? (
-          <div className="card" style={{ padding: 48, textAlign: "center" }}>
-            <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
-            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>No analyses yet</h2>
-            <p style={{ color: "var(--muted)", marginBottom: 24 }}>
-              Analyse a suspicious message to see your history here.
-            </p>
+        {/* Stats */}
+        <div className="dash-stats-grid">
+          <StatCard label="Total checks"     value={stats.total}     sub="all time" />
+          <StatCard label="Fraud detected"   value={stats.fraud}     sub={`${stats.total ? Math.round(stats.fraud/stats.total*100) : 0}% of checks`} />
+          <StatCard label="Safe messages"    value={stats.safe}      sub="confirmed legitimate" />
+          <StatCard label="This month"       value={stats.thisMonth} sub="analyses run" />
+        </div>
+
+        {/* Filter tabs */}
+        <div className="dash-filter-row">
+          {(["ALL", "FRAUD", "LEGITIMATE"] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`dash-filter-btn ${filter === f ? "dash-filter-active" : ""}`}
+            >
+              {f === "ALL" ? "All" : f === "FRAUD" ? "🚨 Fraud" : "✅ Safe"}
+              <span className="dash-filter-count">
+                {f === "ALL" ? analyses.length : analyses.filter(r => r.verdict === f).length}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* List */}
+        {filtered.length === 0 ? (
+          <div className="card dash-empty">
+            <div className="dash-empty-icon">🔍</div>
+            <h2>No analyses yet</h2>
+            <p>Analyse a suspicious message to see your history here.</p>
             <Link href="/analyse" className="btn-primary">Analyse a message →</Link>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            {analyses.map((row) => (
-              <div key={row.id} className="card" style={{ padding: "16px 20px", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 22 }}>{verdictEmoji(row.verdict)}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: verdictColor(row.verdict) }}>
-                    {row.display_verdict?.replace(/_/g, " ")}
+          <div className="dash-list">
+            {filtered.map(row => (
+              <Link key={row.id} href={`/dashboard/${row.id}`} className="card dash-row">
+                <div className="dash-row-emoji">
+                  {VERDICT_EMOJI[row.verdict] ?? "❓"}
+                </div>
+                <div className="dash-row-main">
+                  <div className="dash-row-verdict" style={{ color: VERDICT_COLOR[row.verdict] ?? "var(--muted)" }}>
+                    {row.display_verdict?.replace(/_/g, " ") ?? row.verdict}
                   </div>
-                  <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-                    {row.input_type?.toUpperCase()} · {row.signals?.join(", ") || "no signals"} · {Math.round((row.confidence ?? 0) * 100)}% confidence
+                  <div className="dash-row-meta">
+                    <span className="dash-tag">{row.input_type?.toUpperCase()}</span>
+                    <span className="dash-tag">{Math.round((row.confidence ?? 0) * 100)}% confidence</span>
+                    {row.signals?.slice(0, 2).map((s: string) => (
+                      <span key={s} className="dash-tag dash-tag-signal">{s.replace(/_/g, " ")}</span>
+                    ))}
+                    {row.signals?.length > 2 && (
+                      <span className="dash-tag">+{row.signals.length - 2} more</span>
+                    )}
                   </div>
                 </div>
-                <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "right", flexShrink: 0 }}>
+                <div className="dash-row-date">
                   {new Date(row.created_at).toLocaleDateString("en-IN", {
                     day: "numeric", month: "short", year: "numeric",
-                    hour: "2-digit", minute: "2-digit"
+                    hour: "2-digit", minute: "2-digit",
                   })}
                 </div>
-              </div>
+                <div className="dash-row-arrow">→</div>
+              </Link>
             ))}
           </div>
         )}
+
       </div>
     </main>
   );

@@ -3,6 +3,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import VerdictBanner from "@/components/VerdictBanner";
 import EvidencePanel from "@/components/EvidencePanel";
+import FeedbackForm from "@/components/FeedbackForm";
+import { storeAnalysis } from "@/lib/db";
+import { createClient } from "@/lib/supabase";
+
+
+
 
 // Verdict-specific colour tokens
 const VERDICT_STYLE: Record<string, {
@@ -41,24 +47,45 @@ const VERDICT_STYLE: Record<string, {
 
 export default function ResultPage() {
   const [data, setData] = useState<any>(null);
-
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
   useEffect(() => {
+  const run = async () => {
     const stored = localStorage.getItem("fraud_result");
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        const now    = Date.now();
-        const age    = parsed.timestamp ? (now - parsed.timestamp) : 0;
-        if (age < 60000 || !parsed.timestamp) {
-          setData(parsed);
-        }
-        localStorage.removeItem("fraud_result");
-      } catch (e) {
-        console.error("Failed to parse fraud_result from localStorage:", e);
-        localStorage.removeItem("fraud_result");
+
+    if (!stored) return;
+
+    try {
+      const parsed = JSON.parse(stored);
+      const now = Date.now();
+      const age = parsed.timestamp ? now - parsed.timestamp : 0;
+
+      if (age < 60000 || !parsed.timestamp) {
+        setData(parsed);
       }
+
+      // 🔐 Supabase
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // 🧠 Store analysis
+      const id = await storeAnalysis(
+        parsed,
+        parsed._tab ?? "text",
+        user?.id ?? null
+      );
+
+      if (id) setAnalysisId(id);
+
+      localStorage.removeItem("fraud_result");
+
+    } catch (e) {
+      console.error("Failed to parse fraud_result:", e);
+      localStorage.removeItem("fraud_result");
     }
-  }, []);
+  };
+
+  run();
+}, []);
 
   if (!data) return (
     <div style={{ maxWidth: 560, margin: "100px auto", textAlign: "center", padding: "0 24px" }}>
@@ -254,63 +281,10 @@ export default function ResultPage() {
           </div>
 
           {/* Feedback */}
-          <FeedbackCard />
+          <FeedbackForm analysisId={analysisId} userId={null} />
 
         </div>
       </div>
     </main>
-  );
-}
-function FeedbackCard() {
-  const [sent,    setSent]    = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  async function submit(correct: boolean) {
-    setLoading(true);
-    try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/feedback`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ analysis_id: null, user_says_correct: correct }),
-      });
-      setSent(true);
-    } catch { /* silent */ }
-    setLoading(false);
-  }
-
-  if (sent) return (
-    <div className="card" style={{ padding: "16px 20px", textAlign: "center", fontSize: 14, color: "var(--success)" }}>
-      ✅ Thank you — your feedback helps improve the model.
-    </div>
-  );
-
-  return (
-    <div className="card" style={{ padding: "16px 20px" }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
-        Was this verdict correct?
-      </div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <button
-          onClick={() => submit(true)}
-          disabled={loading}
-          className="btn-outline"
-          style={{ flex: 1, fontSize: 14, padding: "9px 0" }}
-        >
-          👍 Yes, correct
-        </button>
-        <button
-          onClick={() => submit(false)}
-          disabled={loading}
-          style={{
-            flex: 1, fontSize: 14, padding: "9px 0",
-            background: "var(--danger-bg)", color: "var(--danger)",
-            border: "1px solid var(--danger-border)", borderRadius: "var(--radius-sm)",
-            cursor: "pointer", fontWeight: 500,
-          }}
-        >
-          👎 No, wrong verdict
-        </button>
-      </div>
-    </div>
   );
 }

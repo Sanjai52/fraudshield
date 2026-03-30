@@ -1,5 +1,10 @@
+// Verdict shown in UI
 export type DisplayVerdict = "HIGH_FRAUD" | "SUSPICIOUS" | "LEGITIMATE";
 
+// Raw model verdict (strict typing)
+export type RawVerdict = "FRAUD" | "LEGITIMATE";
+
+// Sender validation
 export interface SenderCheck {
   sender:           string;
   status:           "verified" | "known_fake" | "unknown";
@@ -8,34 +13,50 @@ export interface SenderCheck {
   helpline?:        string;
 }
 
+// URL analysis
 export interface UrlCheck {
-  url:                  string;
-  domain:               string;
-  verdict:              "MALICIOUS" | "SUSPICIOUS" | "CLEAN";
-  domain_age_days?:     number;
-  safebrowsing_hit?:    boolean;
+  url:                   string;
+  domain:                string;
+  verdict:               "MALICIOUS" | "SUSPICIOUS" | "CLEAN";
+  domain_age_days?:      number;
+  safebrowsing_hit?:     boolean;
   virustotal_malicious?: number;
-  phishtank_hit?:       boolean;
-  virustotal_score?:    string;
+  phishtank_hit?:        boolean;
+  virustotal_score?:     string;
 }
 
+// Main result type
 export interface AnalysisResult {
-  verdict:           string;          // raw model output: FRAUD | LEGITIMATE
-  display_verdict:   DisplayVerdict;  // mapped UI verdict
-  confidence:        number;          // 0–1
-  fraud_probability: number;          // 0–1
-  signals:           string[];        // e.g. ["urgency_pressure", "credential_harvest"]
-  sender_check:      SenderCheck | null;
-  url_checks:        UrlCheck[];
-  explanation:       string;
-  action:            string;
-  model_version:     string;
-  language:          string;
-  // fields added by frontend before storing to localStorage
-  _input?:           string;
-  _tab?:             "text" | "url" | "screenshot" | "voice";
+  // Core AI output
+  verdict:           RawVerdict;
+  display_verdict:   DisplayVerdict;
+  confidence:        number; // 0–1
+  fraud_probability: number; // 0–1
+
+  // 🧠 AI signals (machine-readable)
+  signals: string[];
+
+  // 👀 UI-friendly explanations
+  flags?: string[];
+
+  // Checks
+  sender_check: SenderCheck | null;
+  url_checks:   UrlCheck[];
+
+  // Explanation & action
+  explanation: string;
+  action:      string;
+
+  // Metadata
+  model_version: string;
+  language:      string;
+
+  // Frontend-only fields
+  _input?: string;
+  _tab?:   "text" | "url" | "screenshot" | "voice";
 }
 
+// Requests
 export interface AnalyseTextRequest {
   message: string;
 }

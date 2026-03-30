@@ -281,7 +281,7 @@ export default function ResultPage() {
           </div>
 
           {/* Feedback */}
-          <FeedbackForm analysisId={analysisId} userId="" />
+          {/* <FeedbackForm analysisId={analysisId} userId="" /> */}
 
         </div>
       </div>

@@ -1,114 +1,65 @@
-"""
-fraud_classifier.py
---------------------
-Loads the fine-tuned MuRIL model and exposes predict() and predict_batch().
-This is the single source of truth for all model inference in the system.
-FastAPI pipelines import from here — nothing else loads the model directly.
-"""
-
 import os
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from pathlib import Path
+HF_TOKEN = os.getenv("HF_TOKEN")
+MODEL_ID = "Sanjai1968/muril-fraud-v1"
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+API_URL = f"https://api-inference.huggingface.co/models/{MODEL_ID}"
 
-MODEL_PATH = os.getenv(
-    "MODEL_PATH",
-    "Sanjai1968/muril-fraud-v1"   # HuggingFace repo
-)
+headers = {
+    "Authorization": f"Bearer {HF_TOKEN}"
+}
 
-
-print("MODEL PATH:", MODEL_PATH)
-VERSION    = "v1"
-
-_tokenizer = None
-_model     = None
-
-
-def _load() -> None:
-    """Lazy-load model on first call. Stays in memory after that."""
-    global _tokenizer, _model
-    if _model is not None:
-        return
-    print(f"[fraud_classifier] Loading model from {MODEL_PATH} ...")
-    _tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-    _model     = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
-    _model.eval()
-    if torch.cuda.is_available():
-        _model = _model.cuda()
-        print("[fraud_classifier] Running on GPU ✓")
-    else:
-        print("[fraud_classifier] Running on CPU")
-    print("[fraud_classifier] Ready ✓")
+VERSION = "v1"
 
 
 def predict(text: str) -> dict:
-    """
-    Analyse a single message.
+    try:
+        response = requests.post(
+            API_URL,
+            headers=headers,
+            json={"inputs": text},
+            timeout=30
+        )
 
-    Returns:
-        {
-            "verdict":           "FRAUD" | "LEGITIMATE",
-            "confidence":        float,
-            "fraud_probability": float,
-            "model_version":     str
+        if response.status_code != 200:
+            return {
+                "verdict": "FRAUD",
+                "confidence": 0.5,
+                "fraud_probability": 0.5,
+                "model_version": VERSION,
+            }
+
+        data = response.json()
+
+        # HF returns list of predictions
+        result = data[0]
+
+        label = result["label"]
+        score = result["score"]
+
+        fraud_prob = score if label == "LABEL_1" else 1 - score
+
+        return {
+            "verdict": "FRAUD" if label == "LABEL_1" else "LEGITIMATE",
+            "confidence": round(score, 4),
+            "fraud_probability": round(fraud_prob, 4),
+            "model_version": VERSION,
         }
-    """
-    _load()
-    inputs = _tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        max_length=256,
-        padding=True
-    )
-    if torch.cuda.is_available():
-        inputs = {k: v.cuda() for k, v in inputs.items()}
 
-    with torch.no_grad():
-        logits = _model(**inputs).logits
+    except Exception as e:
+        print("HF API error:", e)
 
-    probs = torch.softmax(logits, dim=1)[0]
-    label = logits.argmax().item()
-
-    return {
-        "verdict":           "FRAUD" if label == 1 else "LEGITIMATE",
-        "confidence":        round(float(probs[label]), 4),
-        "fraud_probability": round(float(probs[1]), 4),
-        "model_version":     VERSION,
-    }
+        return {
+            "verdict": "FRAUD",
+            "confidence": 0.0,
+            "fraud_probability": 0.0,
+            "model_version": VERSION,
+        }
 
 
 def predict_batch(texts: list[str]) -> list[dict]:
-    """Analyse multiple messages at once."""
-    _load()
-    inputs = _tokenizer(
-        texts,
-        return_tensors="pt",
-        truncation=True,
-        max_length=256,
-        padding=True
-    )
-    if torch.cuda.is_available():
-        inputs = {k: v.cuda() for k, v in inputs.items()}
-
-    with torch.no_grad():
-        logits = _model(**inputs).logits
-
-    probs  = torch.softmax(logits, dim=1)
-    labels = logits.argmax(dim=1).tolist()
-
-    return [
-        {
-            "verdict":           "FRAUD" if lbl == 1 else "LEGITIMATE",
-            "confidence":        round(float(probs[i][lbl]), 4),
-            "fraud_probability": round(float(probs[i][1]), 4),
-            "model_version":     VERSION,
-        }
-        for i, lbl in enumerate(labels)
-    ]
+    return [predict(t) for t in texts]

@@ -25,16 +25,31 @@ THRESHOLD_MODERATE = 0.50
 # If model says FRAUD but fraud_probability is below this, allow override
 OVERRIDE_THRESHOLD = 0.60
 
-# Patterns that are NEVER fraud — always override model if matched
 DEFINITE_LEGIT_PATTERNS = [
+    # Debit/credit card transaction notifications
     "debit card ending", "credit card ending", "card ending",
     "has been used for", "used for rs", "used for \u20b9",
     "has been debited", "has been credited",
+    # Generic debit/credit patterns
     "debited rs", "credited rs",
-    "upi ref", "neft transfer", "imps transfer",
+    "is debited rs", "is credited rs",          # KVB / BOB format
+    "debited inr", "credited inr",
+    "dr. rs", "dr rs", "cr. rs", "cr rs",
+    "a/c is debited", "a/c is credited",        # KVB exact format
+    "your a/c", "your account is debited",
+    "your account is credited",
+    # UPI/NEFT/IMPS reference patterns — always legit
+    "upi ref", "upi:", "upi ref no",
+    "neft transfer", "imps transfer",
+    "avlbal inr", "avl bal inr",               # balance notification
+    "avlbal rs", "avl bal rs",
+    # Generic bank notification closers
+    "not you? call", "if not you call",
     "thank you for banking",
+    # BOB specific
+    "- bob", "-bob", "- kvb", "-kvb",
+    "- sbi", "-sbi",
 ]
-
 # Patterns that strongly indicate a legitimate bank notification
 LEGITIMATE_PATTERNS = [
     "debited rs", "credited rs", "account balance", "a/c balance",
@@ -252,9 +267,15 @@ def _build_explanation(
 
 def _verdict_label(verdict: str, fraud_probability: float) -> str:
     """Map model output to display verdict."""
+    # Model unavailable — start neutral, let rules decide
+    if fraud_probability == 0.0 and verdict == "LEGITIMATE":
+        return "LEGITIMATE"
     if verdict == "FRAUD":
         if fraud_probability >= THRESHOLD_HIGH:
             return "HIGH_FRAUD"
+        if fraud_probability >= THRESHOLD_MODERATE:
+            return "SUSPICIOUS"
+        # Weak fraud signal — treat as suspicious not high fraud
         return "SUSPICIOUS"
     return "LEGITIMATE"
 
@@ -281,8 +302,12 @@ def run(text: str, lang: str = "en") -> dict:
     text = text.strip()
 
     # 1. Model inference
+  # 1. Model inference
     result = predict(text)
 
+    # If model was unavailable (fallback), start from neutral
+    # Rules and signals below will still determine the final verdict
+    model_unavailable = result["confidence"] == 0.0 and result["fraud_probability"] == 0.0
     # 2. Keyword signals
     signals = _detect_signals(text)
 

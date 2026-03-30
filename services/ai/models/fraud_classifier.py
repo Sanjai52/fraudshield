@@ -20,6 +20,7 @@ ONNX_PATH = _AI_ROOT / "onnx_model"
 MODEL_URL  = "https://huggingface.co/Sanjai1968/fraud/resolve/main/model.onnx"
 MODEL_FILE = ONNX_PATH / "model.onnx"
 
+_model_loaded_once = False
 
 def _download_onnx_if_needed():
     if MODEL_FILE.exists():
@@ -132,19 +133,23 @@ def _try_load_pytorch() -> bool:
 
 
 def _load_model():
-    global _mode, _load_done
+    global _mode, _load_done, _model_loaded_once
+
+    if _model_loaded_once:
+        print("[classifier] Model already loaded — skipping")
+        _load_done = True
+        return
 
     if _try_load_onnx():
-        _load_done = True
-        return
+        _mode = "onnx"
+    elif _try_load_pytorch():
+        _mode = "pytorch"
+    else:
+        _mode = "fallback"
+        print("[classifier] ⚠️ fallback mode")
 
-    if _try_load_pytorch():
-        _load_done = True
-        return
-
-    _mode      = "fallback"
+    _model_loaded_once = True
     _load_done = True
-    print("[classifier] ⚠️  No model loaded — using rule-based fallback only")
 
 
 def _infer_onnx(text: str) -> dict:

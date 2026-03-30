@@ -1,168 +1,231 @@
 """
 fraud_classifier.py
 --------------------
-Calls the HuggingFace Inference Router API for the MuRIL fraud classifier.
+Loads the MuRIL ONNX model for fast local inference.
+No HuggingFace API — runs entirely on this server.
 
-IMPORTANT: HuggingFace retired api-inference.huggingface.co (HTTP 410).
-The new endpoint is router.huggingface.co/hf-inference/models/{MODEL_ID}
+Strategy:
+  1. Try ONNX model from services/ai/onnx_model/   (fast, ~100ms)
+  2. Try raw PyTorch model from ml/registry/        (slower, ~300ms)
+  3. Fall back to rule-based signals only           (0ms, still catches most fraud)
 
-LABEL_0 = LEGITIMATE
-LABEL_1 = FRAUD
+The model is lazy-loaded once on first predict() call and cached
+for the lifetime of the process.
 
-Run locally:
-    MODEL_PATH=../../ml/registry/muril-fraud-v1 python -c "from models.fraud_classifier import predict; print(predict('test'))"
+Labels:
+  LABEL_0 = LEGITIMATE
+  LABEL_1 = FRAUD
 """
 
+from __future__ import annotations
+
 import os
-import time
-import requests
+import threading
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
-HF_TOKEN = os.getenv("HF_TOKEN", "")
-MODEL_ID  = "Sanjai1968/muril-fraud-v1"
+# ── Path resolution ───────────────────────────────────────────
+_THIS_DIR  = Path(__file__).resolve().parent   # services/ai/models/
+_AI_ROOT   = _THIS_DIR.parent                  # services/ai/
+_REPO_ROOT = _AI_ROOT.parent.parent            # fraudshield/
 
-# ── NEW endpoint — router.huggingface.co (replaces api-inference which returned 410) ──
-API_URL  = f"https://router.huggingface.co/hf-inference/models/{MODEL_ID}"
-VERSION  = "v1"
+# ONNX model (preferred — fast)
+ONNX_PATH    = _AI_ROOT / "onnx_model"
+
+# PyTorch fallback
+_ENV_PATH    = os.getenv("MODEL_PATH", "")
+if _ENV_PATH:
+    PT_PATH = Path(_ENV_PATH)
+    if not PT_PATH.is_absolute():
+        PT_PATH = (_AI_ROOT / PT_PATH).resolve()
+else:
+    PT_PATH = _REPO_ROOT / "ml" / "registry" / "muril-fraud-v1"
+
+VERSION = "v1"
+
+# ── Lazy-load state ───────────────────────────────────────────
+_model      = None
+_tokenizer  = None
+_mode       = None   # "onnx" | "pytorch" | "fallback"
+_lock       = threading.Lock()
+_load_done  = False
+
+
+def _try_load_onnx() -> bool:
+    """Attempt to load ONNX model. Returns True on success."""
+    global _model, _tokenizer, _mode
+
+    if not ONNX_PATH.exists():
+        print(f"[classifier] ONNX model not found at {ONNX_PATH}")
+        return False
+
+    required = ["model.onnx", "config.json", "tokenizer.json"]
+    missing  = [f for f in required if not (ONNX_PATH / f).exists()]
+    if missing:
+        print(f"[classifier] ONNX model incomplete — missing: {missing}")
+        return False
+
+    try:
+        from optimum.onnxruntime import ORTModelForSequenceClassification
+        from transformers import AutoTokenizer
+
+        print(f"[classifier] Loading ONNX model from {ONNX_PATH} ...")
+        _tokenizer = AutoTokenizer.from_pretrained(str(ONNX_PATH), local_files_only=True)
+        _model     = ORTModelForSequenceClassification.from_pretrained(
+            str(ONNX_PATH), local_files_only=True
+        )
+        _mode = "onnx"
+        print(f"[classifier] ✅ ONNX model loaded — fast inference ready")
+        return True
+
+    except ImportError:
+        print("[classifier] optimum/onnxruntime not installed — trying PyTorch")
+        return False
+    except Exception as e:
+        print(f"[classifier] ONNX load error: {e}")
+        return False
+
+
+def _try_load_pytorch() -> bool:
+    """Attempt to load raw PyTorch model. Returns True on success."""
+    global _model, _tokenizer, _mode
+
+    if not PT_PATH.exists():
+        print(f"[classifier] PyTorch model not found at {PT_PATH}")
+        return False
+
+    required = ["config.json", "model.safetensors", "tokenizer.json", "tokenizer_config.json"]
+    missing  = [f for f in required if not (PT_PATH / f).exists()]
+    if missing:
+        print(f"[classifier] PyTorch model incomplete — missing: {missing}")
+        return False
+
+    try:
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+        print(f"[classifier] Loading PyTorch model from {PT_PATH} ...")
+        _tokenizer = AutoTokenizer.from_pretrained(str(PT_PATH), local_files_only=True)
+        _model     = AutoModelForSequenceClassification.from_pretrained(
+            str(PT_PATH), local_files_only=True
+        )
+        _model.eval()
+        _mode = "pytorch"
+        print(f"[classifier] ✅ PyTorch model loaded")
+        return True
+
+    except ImportError:
+        print("[classifier] transformers not installed")
+        return False
+    except Exception as e:
+        print(f"[classifier] PyTorch load error: {e}")
+        return False
+
+
+def _load_model():
+    """Try ONNX first, then PyTorch, then mark as fallback."""
+    global _mode, _load_done
+
+    if _try_load_onnx():
+        _load_done = True
+        return
+
+    if _try_load_pytorch():
+        _load_done = True
+        return
+
+    _mode      = "fallback"
+    _load_done = True
+    print("[classifier] ⚠️  No model loaded — using rule-based fallback only")
+
+
+def _infer_onnx(text: str) -> dict:
+    """Run ONNX inference."""
+    import torch
+
+    inputs  = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
+    outputs = _model(**inputs)
+    probs   = torch.softmax(outputs.logits, dim=-1)[0]
+
+    fraud_prob = float(probs[1])
+    legit_prob = float(probs[0])
+    verdict    = "FRAUD" if fraud_prob > 0.5 else "LEGITIMATE"
+    confidence = fraud_prob if verdict == "FRAUD" else legit_prob
+
+    return {
+        "verdict":           verdict,
+        "confidence":        round(confidence, 4),
+        "fraud_probability": round(fraud_prob, 4),
+        "model_version":     f"{VERSION}-onnx",
+    }
+
+
+def _infer_pytorch(text: str) -> dict:
+    """Run PyTorch inference."""
+    import torch
+
+    inputs = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
+    with torch.no_grad():
+        outputs = _model(**inputs)
+    probs = torch.softmax(outputs.logits, dim=-1)[0]
+
+    # Determine fraud index from config
+    id2label   = getattr(_model.config, "id2label", {0: "LABEL_0", 1: "LABEL_1"})
+    fraud_idx  = next(
+        (int(k) for k, v in id2label.items() if str(v).upper() in ("LABEL_1", "FRAUD", "1")),
+        1
+    )
+    legit_idx  = 1 - fraud_idx
+
+    fraud_prob = float(probs[fraud_idx])
+    legit_prob = float(probs[legit_idx])
+    verdict    = "FRAUD" if fraud_prob > 0.5 else "LEGITIMATE"
+    confidence = fraud_prob if verdict == "FRAUD" else legit_prob
+
+    return {
+        "verdict":           verdict,
+        "confidence":        round(confidence, 4),
+        "fraud_probability": round(fraud_prob, 4),
+        "model_version":     f"{VERSION}",
+    }
 
 
 def predict(text: str) -> dict:
     """
-    Call the HuggingFace Inference Router and parse the response.
+    Run inference on a single text string.
 
-    Response shape from HF binary classifier:
-        [[{"label": "LABEL_0", "score": 0.91}, {"label": "LABEL_1", "score": 0.09}]]
-
-    Handles:
-      - Shape A: [[{label, score}, {label, score}]]  — all labels returned
-      - Shape B: [{label, score}]                    — top-1 only
-      - 503 model loading                            — retry once after 20s
-      - Timeout / network error                      — rule-based fallback
+    Returns:
+        verdict:           "FRAUD" | "LEGITIMATE"
+        confidence:        float 0-1
+        fraud_probability: float 0-1
+        model_version:     str
     """
-    if not HF_TOKEN:
-        print("[classifier] WARNING: HF_TOKEN not set — falling back to rule-based only")
-        return _fallback_neutral()
+    global _load_done
 
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type":  "application/json",
-    }
+    # Thread-safe lazy load — only once
+    with _lock:
+        if not _load_done:
+            _load_model()
 
-    payload = {"inputs": text}
-
-    # ── First attempt ─────────────────────────────────────────
     try:
-        resp = requests.post(API_URL, headers=headers, json=payload, timeout=30)
-    except requests.exceptions.Timeout:
-        print("[classifier] HF API timeout on first attempt")
-        return _fallback_neutral()
-    except requests.exceptions.ConnectionError as e:
-        print(f"[classifier] HF connection error: {e}")
-        return _fallback_neutral()
+        if _mode == "onnx":
+            return _infer_onnx(text)
 
-    # ── Handle 503 (model loading / cold start) ───────────────
-    if resp.status_code == 503:
-        print("[classifier] HF model loading (503) — waiting 25s then retrying")
-        time.sleep(25)
-        try:
-            resp = requests.post(API_URL, headers=headers, json=payload, timeout=45)
-        except Exception as e:
-            print(f"[classifier] Retry failed: {e}")
-            return _fallback_neutral()
-
-    # ── Handle non-200 ────────────────────────────────────────
-    if resp.status_code != 200:
-        print(f"[classifier] HF API error: HTTP {resp.status_code} — {resp.text[:300]}")
-        return _fallback_neutral()
-
-    # ── Parse response ────────────────────────────────────────
-    try:
-        data = resp.json()
-    except Exception as e:
-        print(f"[classifier] Failed to parse JSON: {e}")
-        return _fallback_neutral()
-
-    return _parse_response(data)
-
-
-def _parse_response(data) -> dict:
-    """
-    Parse the HF inference response into a standardised prediction dict.
-    Handles both response shapes robustly.
-    """
-    try:
-        if not isinstance(data, list) or len(data) == 0:
-            print(f"[classifier] Unexpected response type: {type(data)} — {str(data)[:200]}")
-            return _fallback_neutral()
-
-        inner = data[0]
-
-        # ── Shape A: [[{label, score}, ...]] ─────────────────
-        if isinstance(inner, list):
-            label_map = {}
-            for item in inner:
-                if isinstance(item, dict) and "label" in item and "score" in item:
-                    label_map[item["label"]] = float(item["score"])
-
-            # LABEL_1 = FRAUD, LABEL_0 = LEGITIMATE
-            fraud_prob = (
-                label_map.get("LABEL_1")
-                or label_map.get("FRAUD")
-                or label_map.get("1")
-            )
-            legit_prob = (
-                label_map.get("LABEL_0")
-                or label_map.get("LEGITIMATE")
-                or label_map.get("0")
-            )
-
-            if fraud_prob is None:
-                print(f"[classifier] Unknown label names: {list(label_map.keys())}")
-                return _fallback_neutral()
-
-            legit_prob  = legit_prob if legit_prob is not None else (1.0 - fraud_prob)
-            verdict     = "FRAUD" if fraud_prob > 0.5 else "LEGITIMATE"
-            confidence  = fraud_prob if verdict == "FRAUD" else legit_prob
-
-            return {
-                "verdict":           verdict,
-                "confidence":        round(confidence, 4),
-                "fraud_probability": round(fraud_prob, 4),
-                "model_version":     VERSION,
-            }
-
-        # ── Shape B: [{label, score}] ─────────────────────────
-        elif isinstance(inner, dict):
-            label     = inner.get("label", "LABEL_0")
-            score     = float(inner.get("score", 0.5))
-            is_fraud  = label in ("LABEL_1", "FRAUD", "1")
-            fraud_prob = score if is_fraud else round(1.0 - score, 4)
-            verdict    = "FRAUD" if is_fraud else "LEGITIMATE"
-
-            return {
-                "verdict":           verdict,
-                "confidence":        round(score, 4),
-                "fraud_probability": round(fraud_prob, 4),
-                "model_version":     VERSION,
-            }
-
-        else:
-            print(f"[classifier] Unknown inner type: {type(inner)} — {str(inner)[:200]}")
-            return _fallback_neutral()
+        if _mode == "pytorch":
+            return _infer_pytorch(text)
 
     except Exception as e:
-        print(f"[classifier] Parse error: {e}")
-        return _fallback_neutral()
+        print(f"[classifier] Inference error ({_mode}): {e}")
+
+    return _fallback_neutral()
 
 
 def _fallback_neutral() -> dict:
     """
-    Returns a NEUTRAL starting point when the model is unavailable.
-    fraud_probability=0.0 AND confidence=0.0 signals to the pipeline
-    that the model was unavailable — rules/signals will decide the verdict.
-    Do NOT return FRAUD here — that creates false positives.
+    Neutral result when no model is available.
+    confidence=0.0 signals to the pipeline that the model was unavailable.
+    The pipeline's rule-based signals will still decide the verdict.
     """
     return {
         "verdict":           "LEGITIMATE",
@@ -173,5 +236,4 @@ def _fallback_neutral() -> dict:
 
 
 def predict_batch(texts: list) -> list:
-    """Run predict on a list of texts."""
     return [predict(t) for t in texts]

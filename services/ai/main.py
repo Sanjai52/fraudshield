@@ -32,10 +32,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-@app.on_event("startup")
-def load_model():
-    print("🚀 Preloading model...")
-    _load()
+
     
 # Gateway only — never the browser directly
 _ALLOWED = [o.strip() for o in os.getenv(

@@ -19,8 +19,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 MODEL_PATH = os.getenv(
     "MODEL_PATH",
-    str(BASE_DIR / "ml" / "registry" / "muril-fraud-v1")
+    "Sanjai1968/muril-fraud-v1"   # HuggingFace repo
 )
+
+
 print("MODEL PATH:", MODEL_PATH)
 VERSION    = "v1"
 

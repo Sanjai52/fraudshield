@@ -12,7 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
+import uuid
+import bleach
+from fastapi import Header
+from jose import jwt, JWTError
 import io
+
+SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 load_dotenv()
 
@@ -23,9 +29,14 @@ app = FastAPI(
 )
 
 # Gateway only — never the browser directly
+_ALLOWED = [o.strip() for o in os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:3001"
+).split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001"],
+    allow_origins=_ALLOWED,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -141,3 +152,114 @@ def feedback():
 @app.post("/report")
 def report():
     return {"status": "not_implemented", "week": 9}
+
+# ═══════════════════════════════════════════════════════════════
+# CHATBOT — merged from services/chatbot/main.py
+# All /chat/* routes live here in production (single Render service)
+# ═══════════════════════════════════════════════════════════════
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "chatbot"))
+
+from chatbot_llm import chat_with_gemini, analyse_message_for_chat, format_analysis_for_chat
+
+# ── In-memory chat store (resets on restart — acceptable for student project)
+_CHATS: dict = {}
+
+def _user_key(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        if token:
+            return token[:36]
+    return f"guest_{request.client.host}"
+
+def _sanitize_chat(text: str) -> str:
+    import bleach
+    return bleach.clean(str(text), tags=[], strip=True)[:1500].strip()
+
+_BANK_KWS = {"account","blocked","kyc","otp","verify","upi","debited",
+              "credited","sbi","hdfc","icici","axis","kotak","bob",
+              "bank","neft","imps","transaction","fraud","avlbal","ref"}
+
+def _is_sms(text: str) -> bool:
+    lower = text.lower()
+    hits = sum(1 for k in _BANK_KWS if k in lower)
+    return len(text) < 400 and hits >= 2 and not text.strip().endswith("?")
+
+
+@app.get("/chat/health")
+def chat_health():
+    return {"status": "ok", "service": "chatbot", "storage": "in-memory"}
+
+@app.post("/chat/new")
+async def chat_new(request: Request):
+    uid = _user_key(request)
+    cid = str(uuid.uuid4())
+    _CHATS.setdefault(uid, {})[cid] = []
+    return {"chat_id": cid}
+
+@app.get("/chats")
+async def chat_list(request: Request):
+    uid = _user_key(request)
+    result = []
+    for cid, msgs in _CHATS.get(uid, {}).items():
+        if msgs:
+            preview = next((m["content"][:60] for m in msgs if m["role"] == "user"), "")
+            result.append({"chat_id": cid, "preview": preview})
+    return {"chats": result}
+
+@app.get("/chat/{chat_id}")
+async def chat_load(chat_id: str, request: Request):
+    uid  = _user_key(request)
+    msgs = _CHATS.get(uid, {}).get(chat_id, [])
+    return {"messages": [{"role": m["role"], "content": m["content"]} for m in msgs]}
+
+@app.delete("/chat/{chat_id}")
+async def chat_delete(chat_id: str, request: Request):
+    uid = _user_key(request)
+    _CHATS.get(uid, {}).pop(chat_id, None)
+    return {"ok": True}
+
+@app.delete("/chats")
+async def chat_delete_all(request: Request):
+    uid = _user_key(request)
+    _CHATS.pop(uid, None)
+    return {"ok": True}
+
+class ChatBody(BaseModel):
+    chat_id: str
+    message: str
+    history: list = []
+
+@app.post("/chat")
+async def chat_send(body: ChatBody, request: Request):
+    uid = _user_key(request)
+    msg = _sanitize_chat(body.message)
+    if not msg:
+        raise HTTPException(status_code=400, detail="Empty message")
+
+    _CHATS.setdefault(uid, {}).setdefault(body.chat_id, [])
+    _CHATS[uid][body.chat_id].append({"role": "user", "content": msg})
+
+    if _is_sms(msg):
+        analysis = await analyse_message_for_chat(msg)
+        if analysis:
+            reply = format_analysis_for_chat(analysis)
+            _CHATS[uid][body.chat_id].append({"role": "assistant", "content": reply})
+            return {"reply": reply, "chat_id": body.chat_id}
+
+    stored = _CHATS.get(uid, {}).get(body.chat_id, [])
+    if len(stored) > 1:
+        llm_history = [
+            ("User" if m["role"] == "user" else "Assistant") + ": " + m["content"]
+            for m in stored
+        ]
+    else:
+        llm_history = [
+            ("User" if m.get("role") == "user" else "Assistant") + ": " + m.get("content", "")
+            for m in (body.history or [])[-10:]
+        ] or [f"User: {msg}"]
+
+    reply = chat_with_gemini(llm_history)
+    _CHATS[uid][body.chat_id].append({"role": "assistant", "content": reply})
+    return {"reply": reply, "chat_id": body.chat_id}

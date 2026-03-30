@@ -1,59 +1,35 @@
 """
 services/chatbot/main.py
 -------------------------
-FraudShield chatbot — production-ready FastAPI service.
+FraudShield chatbot — in-memory storage (no DB), Supabase JWT auth.
+Works locally on port 8001.
+Run: uvicorn main:app --reload --port 8001
 """
 
 import os
 import uuid
 import bleach
-from datetime import datetime
-from typing import Optional   # ✅ ADDED
+from typing import Optional
 
 from fastapi import FastAPI, Request, Body, HTTPException
-from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from starlette.middleware.sessions import SessionMiddleware
-from authlib.integrations.starlette_client import OAuth
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from dotenv import load_dotenv
 
-# DB connection temporarily removed
-# In-memory dictionary to store chats
-# Format: { user_id: { chat_id: [ {"role": "user"|"assistant", "content": "..."} ] } }
-IN_MEMORY_CHATS = {}
-
-def get_chat_history_in_memory(user_id: str, chat_id: str) -> list[str]:
-    history = []
-    user_chats = IN_MEMORY_CHATS.get(user_id, {})
-    messages = user_chats.get(chat_id, [])
-    for m in messages:
-        if m["role"] == "user":
-            history.append(f"User: {m['content']}")
-        elif m["role"] == "assistant":
-            history.append(f"Assistant: {m['content']}")
-    return history
-
-def save_message_in_memory(user_id: str, chat_id: str, role: str, content: str):
-    if user_id not in IN_MEMORY_CHATS:
-        IN_MEMORY_CHATS[user_id] = {}
-    if chat_id not in IN_MEMORY_CHATS[user_id]:
-        IN_MEMORY_CHATS[user_id][chat_id] = []
-    IN_MEMORY_CHATS[user_id][chat_id].append({"role": role, "content": content})
 from llm import chat_with_gemini, analyse_message_for_chat, format_analysis_for_chat
 
 load_dotenv()
 
 # ── Config ────────────────────────────────────────────────────
-SESSION_SECRET  = os.getenv("SESSION_SECRET", "")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 IS_PRODUCTION   = os.getenv("ENV", "development") == "production"
 
-if not SESSION_SECRET:
-    raise RuntimeError("SESSION_SECRET must be set in .env")
+# ── In-memory chat store ──────────────────────────────────────
+# { user_id: { chat_id: [ {role, content} ] } }
+IN_MEMORY_CHATS: dict = {}
 
 # ── Rate limiter ──────────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/day"])
@@ -68,19 +44,11 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# ── Middleware ────────────────────────────────────────────────
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=SESSION_SECRET,
-    https_only=IS_PRODUCTION,
-    same_site="lax",
-    max_age=86400,
-)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -94,134 +62,152 @@ async def security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"]        = "strict-origin-when-cross-origin"
     return response
 
-# ── OAuth ─────────────────────────────────────────────────────
-oauth = OAuth()
-oauth.register(
-    name="google",
-    client_id=os.getenv("GOOGLE_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
-    client_kwargs={"scope": "openid email profile"},
-)
-
-# ── Helpers ───────────────────────────────────────────────────
-def get_user(request: Request) -> Optional[dict]:
-    # Try getting user from session first (oauth)
-    user = request.session.get("user")
-    if user: return user
-    
-    # Try getting user from Authorization header (Supabase)
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        # Since we bypass db, we will just use the token as an identifier
-        token = auth_header.split(" ")[1]
-        return {"id": token[:30], "name": "App User", "email": ""}
-        
+# ── Auth helper ───────────────────────────────────────────────
+def get_user_id(request: Request) -> Optional[str]:
+    """
+    Extracts user identifier from Authorization header.
+    Uses first 36 chars of token as a stable in-memory key.
+    Works with Supabase JWT without needing to verify the secret locally.
+    """
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        token = auth.split(" ", 1)[1].strip()
+        if token:
+            return token[:36]   # stable per-session key
     return None
 
+# ── In-memory helpers ─────────────────────────────────────────
+def mem_save(user_id: str, chat_id: str, role: str, content: str) -> None:
+    IN_MEMORY_CHATS.setdefault(user_id, {}).setdefault(chat_id, [])
+    IN_MEMORY_CHATS[user_id][chat_id].append({"role": role, "content": content})
+
+def mem_history(user_id: str, chat_id: str) -> list[str]:
+    messages = IN_MEMORY_CHATS.get(user_id, {}).get(chat_id, [])
+    lines = []
+    for m in messages:
+        prefix = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{prefix}: {m['content']}")
+    return lines
+
+def mem_messages(user_id: str, chat_id: str) -> list[dict]:
+    return IN_MEMORY_CHATS.get(user_id, {}).get(chat_id, [])
+
+def mem_list_chats(user_id: str) -> list[dict]:
+    user_data = IN_MEMORY_CHATS.get(user_id, {})
+    result = []
+    for chat_id, msgs in user_data.items():
+        if msgs:
+            result.append({
+                "chat_id": chat_id,
+                "preview": msgs[0]["content"][:60] if msgs[0]["role"] == "user" else msgs[1]["content"][:60] if len(msgs) > 1 else "",
+            })
+    return result
+
+def mem_delete_chat(user_id: str, chat_id: str) -> None:
+    IN_MEMORY_CHATS.get(user_id, {}).pop(chat_id, None)
+
+def mem_delete_all(user_id: str) -> None:
+    IN_MEMORY_CHATS.pop(user_id, None)
+
+# ── Sanitize ──────────────────────────────────────────────────
 def sanitize(text: str, max_len: int = 1500) -> str:
     return bleach.clean(str(text), tags=[], strip=True)[:max_len].strip()
 
 BANK_KEYWORDS = {
-    "account", "blocked", "kyc", "otp", "verify", "upi",
-    "debited", "credited", "sbi", "hdfc", "icici", "axis",
-    "kotak", "bank", "neft", "imps", "transaction", "fraud",
-    "suspicious", "phishing", "scam", "click", "link",
+    "account", "blocked", "kyc", "otp", "verify", "upi", "debited",
+    "credited", "sbi", "hdfc", "icici", "axis", "kotak", "bob",
+    "bank", "neft", "imps", "transaction", "fraud", "suspicious",
+    "phishing", "scam", "click", "link", "avlbal", "ref",
 }
 
 def looks_like_sms(text: str) -> bool:
     lower = text.lower()
-    keyword_count = sum(1 for kw in BANK_KEYWORDS if kw in lower)
+    hits  = sum(1 for kw in BANK_KEYWORDS if kw in lower)
     return (
         len(text) < 400
-        and keyword_count >= 2
+        and hits >= 2
         and not text.strip().endswith("?")
     )
 
-# ── Auth routes ───────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "fraudshield-chatbot"}
+    return {"status": "ok", "service": "fraudshield-chatbot", "storage": "in-memory"}
 
-@app.get("/login")
-async def login(request: Request):
-    redirect_uri = request.url_for("auth_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
 
-@app.get("/auth/callback")
-async def auth_callback(request: Request):
-    try:
-        token = await oauth.google.authorize_access_token(request)
-        info  = token.get("userinfo")
-    except Exception as e:
-        return HTMLResponse(f"Authentication failed: {e}", status_code=400)
-
-    if not info or not info.get("email"):
-        return HTMLResponse("Login failed — no user info", status_code=400)
-
-    request.session["user"] = {
-        "id":      info["sub"],
-        "name":    info["name"],
-        "email":   info["email"],
-        "picture": info.get("picture", ""),
-    }
-    return RedirectResponse(os.getenv("FRONTEND_URL", "http://localhost:3000"))
-
-@app.get("/me")
-def me(request: Request):
-    user = get_user(request)
-    if not user:
-        return JSONResponse({"authenticated": False})
-    return {"authenticated": True, "user": user}
-
-@app.get("/logout")
-def logout(request: Request):
-    request.session.clear()
-    return RedirectResponse(os.getenv("FRONTEND_URL", "http://localhost:3000"))
-
-# ── Chat routes ───────────────────────────────────────────────
 @app.post("/chat/new")
 @limiter.limit("30/minute")
 def new_chat(request: Request):
-    user = get_user(request)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
-    return {"chat_id": str(uuid.uuid4())}
+    """
+    Creates a new chat session.
+    Works for both logged-in users and guests.
+    """
+    user_id = get_user_id(request) or f"guest_{request.client.host}"
+    chat_id = str(uuid.uuid4())
+    # Pre-initialise the chat slot
+    IN_MEMORY_CHATS.setdefault(user_id, {})[chat_id] = []
+    return {"chat_id": chat_id}
+
 
 @app.get("/chats")
 @limiter.limit("30/minute")
-def list_user_chats(request: Request):
-    user = get_user(request)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
-    return {"chats": []} # List chats not needed for now, return empty
+def list_chats(request: Request):
+    user_id = get_user_id(request)
+    if not user_id:
+        return {"chats": []}
+    return {"chats": mem_list_chats(user_id)}
+
 
 @app.get("/chat/{chat_id}")
 @limiter.limit("30/minute")
 def load_chat(chat_id: str, request: Request):
-    user = get_user(request)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user_id = get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     try:
         uuid.UUID(chat_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid chat ID")
-
-    user_chats = IN_MEMORY_CHATS.get(user["id"], {})
-    msgs = user_chats.get(chat_id, [])
+    msgs = mem_messages(user_id, chat_id)
     return {"messages": [{"role": m["role"], "content": m["content"]} for m in msgs]}
+
+
+@app.delete("/chat/{chat_id}")
+@limiter.limit("20/minute")
+def delete_chat(chat_id: str, request: Request):
+    user_id = get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    mem_delete_chat(user_id, chat_id)
+    return {"ok": True}
+
+
+@app.delete("/chats")
+@limiter.limit("10/minute")
+def delete_all_chats(request: Request):
+    user_id = get_user_id(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    mem_delete_all(user_id)
+    return {"ok": True}
+
 
 @app.post("/chat")
 @limiter.limit("20/minute")
 async def chat(request: Request, data: dict = Body(...)):
-    user = get_user(request)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    """
+    Main chat endpoint.
+    Accepts optional Authorization header — guests allowed.
+    Sends history from frontend payload for stateless fallback.
+    """
+    user_id = get_user_id(request) or f"guest_{request.client.host}"
 
-    chat_id = data.get("chat_id", "")
-    msg     = sanitize(data.get("message", ""))
+    chat_id  = data.get("chat_id", "")
+    raw_msg  = data.get("message", "")
+    frontend_history = data.get("history", [])   # last N messages from frontend
 
-    if not chat_id or not msg:
+    if not chat_id or not raw_msg:
         raise HTTPException(status_code=400, detail="chat_id and message required")
 
     try:
@@ -229,36 +215,35 @@ async def chat(request: Request, data: dict = Body(...)):
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid chat ID")
 
-    save_message_in_memory(user["id"], chat_id, "user", msg)
+    msg = sanitize(raw_msg)
+    if not msg:
+        raise HTTPException(status_code=400, detail="Empty message after sanitization")
 
+    # Save user message
+    mem_save(user_id, chat_id, "user", msg)
+
+    # Auto-analyse if message looks like a suspicious SMS
     if looks_like_sms(msg):
         analysis = await analyse_message_for_chat(msg)
         if analysis:
             reply = format_analysis_for_chat(analysis)
-            save_message_in_memory(user["id"], chat_id, "assistant", reply)
-            return {"reply": reply, "analysis_id": analysis.get("id")}
+            mem_save(user_id, chat_id, "assistant", reply)
+            return {"reply": reply, "chat_id": chat_id}
 
-    history = get_chat_history_in_memory(user["id"], chat_id)
-    reply   = chat_with_gemini(history)
+    # Build LLM history — prefer in-memory, fall back to frontend payload
+    in_mem = mem_history(user_id, chat_id)
+    if len(in_mem) > 1:
+        llm_history = in_mem
+    else:
+        # Use history sent from frontend (works for guests too)
+        llm_history = []
+        for m in (frontend_history or [])[-10:]:
+            prefix = "User" if m.get("role") == "user" else "Assistant"
+            llm_history.append(f"{prefix}: {m.get('content', '')}")
+        if not llm_history:
+            llm_history.append(f"User: {msg}")
 
-    save_message_in_memory(user["id"], chat_id, "assistant", reply)
-    return {"reply": reply}
+    reply = chat_with_gemini(llm_history)
+    mem_save(user_id, chat_id, "assistant", reply)
 
-# ── Guest chat ───────────────────────────────────────────────
-@app.post("/chat/guest")
-@limiter.limit("5/hour")
-async def guest_chat(request: Request, data: dict = Body(...)):
-    msg = sanitize(data.get("message", ""))
-    if not msg:
-        raise HTTPException(status_code=400, detail="message required")
-
-    if looks_like_sms(msg):
-        analysis = await analyse_message_for_chat(msg)
-        if analysis:
-            return {"reply": format_analysis_for_chat(analysis)}
-
-    reply = chat_with_gemini(
-        ["User: " + msg],
-        system="You are FraudShield AI. Help this user understand if their message is a scam. Be concise.",
-    )
-    return {"reply": reply}
+    return {"reply": reply, "chat_id": chat_id}

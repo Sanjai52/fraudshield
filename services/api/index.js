@@ -27,12 +27,17 @@ const feedbackRoutes            = require("./routes/feedback");
 const app  = express();
 const PORT = process.env.PORT ?? 3001;
 const AI_URL = process.env.FASTAPI_URL ?? "http://localhost:8000";
+const CHATBOT_URL = process.env.CHATBOT_URL ?? "http://localhost:8001";
 
 // ── Global middleware ─────────────────────────────────────────
 app.use(cors({
-  origin:      ["http://localhost:3000"],
+  origin: [
+    "http://localhost:3000",
+    process.env.FRONTEND_URL ?? "https://your-app.vercel.app",
+  ],
   credentials: true,
 }));
+
 app.use(express.json({ limit: "2mb" }));
 app.use(authMiddleware);         // attach req.user if token present
 app.use(piiStripMiddleware);     // strip PII from all request bodies
@@ -68,6 +73,70 @@ app.get("/health", async (req, res) => {
   }
 });
 
+// ── Chatbot proxy → port 8001 ────────────────────────────────
+// Frontend calls /chat/* through this gateway in production.
+// In dev, ChatBot.tsx can call 8001 directly (NEXT_PUBLIC_CHATBOT_URL).
+
+
+app.all("/chat/new", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chat/new`, {
+      method:  "POST",
+      headers: buildChatHeaders(req),
+    });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+app.get("/chats", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chats`, { headers: buildChatHeaders(req) });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+app.get("/chat/:id", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chat/${req.params.id}`, { headers: buildChatHeaders(req) });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+app.delete("/chat/:id", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chat/${req.params.id}`, {
+      method: "DELETE", headers: buildChatHeaders(req),
+    });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+app.delete("/chats", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chats`, {
+      method: "DELETE", headers: buildChatHeaders(req),
+    });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+app.post("/chat", async (req, res) => {
+  try {
+    const r = await fetch(`${CHATBOT_URL}/chat`, {
+      method:  "POST",
+      headers: { ...buildChatHeaders(req), "Content-Type": "application/json" },
+      body:    JSON.stringify(req.body),
+    });
+    return res.status(r.status).json(await r.json());
+  } catch { return res.status(502).json({ error: "Chatbot unavailable" }); }
+});
+
+function buildChatHeaders(req) {
+  const h = {};
+  if (req.headers.authorization) h["Authorization"] = req.headers.authorization;
+  return h;
+}
+// ── End chatbot proxy ─────────────────────────────────────────
 app.get("/", (req, res) => {
   res.json({ service: "FraudShield API Gateway", version: "1.0.0", status: "ok" });
 });

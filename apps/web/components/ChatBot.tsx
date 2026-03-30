@@ -4,8 +4,14 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { createClient } from "@/lib/supabase";
 import { usePathname } from "next/navigation";
 
+// Local dev: hits chatbot directly on 8001
+// Production: goes through API gateway which proxies to chatbot
+// In production: same URL as the AI backend (chatbot merged into it)
+// In dev: hits chatbot on 8001 directly OR AI on 8000 if merged locally
 const CHATBOT_URL =
-  process.env.NEXT_PUBLIC_CHATBOT_URL ?? "http://localhost:8001";
+  process.env.NEXT_PUBLIC_CHATBOT_URL ??
+  process.env.NEXT_PUBLIC_BACKEND_URL ??
+  "http://localhost:8000";
 
 type Message = { role: "user" | "assistant"; content: string };
 
@@ -176,7 +182,11 @@ export default function ChatBot() {
           "Content-Type": "application/json",
           ...(authHeader ? { Authorization: authHeader } : {}),
         },
-        body: JSON.stringify({ chat_id: chatId, message: msg }),
+        body: JSON.stringify({
+        chat_id: chatId,
+        message: msg,
+        history: messages.slice(-10),   // send recent history so backend has context
+}),
       });
 
       if (!res.ok) throw new Error("Request failed");

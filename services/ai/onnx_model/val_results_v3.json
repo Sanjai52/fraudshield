@@ -1,0 +1,15 @@
+{
+  "model_version": "muril-fraud-v3",
+  "base_model": "google/muril-base-cased",
+  "train_size": 107097,
+  "val_size": 22950,
+  "accuracy": 0.9873,
+  "precision": 0.9923,
+  "recall": 0.9796,
+  "f1": 0.9859,
+  "false_positive_rate": 0.0063,
+  "epochs_config": 5,
+  "learning_rate": 1e-05,
+  "class_weight_ratio": 1.204,
+  "sms_test_score": "18/18"
+}

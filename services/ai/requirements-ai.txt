@@ -1,18 +1,27 @@
 fastapi==0.95.2
 uvicorn==0.29.0
 pydantic==1.10.13
+
 bleach==6.1.0
 python-dotenv==1.0.0
 requests==2.31.0
 python-whois==0.9.4
-torch==2.2.2
+
+# ML / NLP (previously removed — now added back)
+torch==2.2.2+cpu
+transformers==4.40.2
+safetensors==0.4.3
+librosa==0.10.1
+
+# OCR / Image
 Pillow>=11.0.0
 pytesseract==0.3.10
 
+# Audio / Math
 numpy==1.26.4
 soundfile==0.12.1
 
+# APIs
 google-generativeai==0.7.2
-bleach==6.1.0
 httpx==0.25.2
 python-jose[cryptography]==3.3.0

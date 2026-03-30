@@ -147,30 +147,42 @@ def _signal_based_verdict(
     signals: List[str],
     fraud_probability: float,
     current_display: str,
+    model_unavailable: bool = False,
 ) -> Optional[str]:
     """
-    If the model is weak but keyword signals are strong, escalate the verdict.
-    Returns a new display verdict string, or None if no escalation needed.
+    If the model is weak/unavailable but keyword signals are strong, escalate verdict.
+    When model is unavailable, signals are the ONLY source of truth — lower the bar.
     """
     signal_set  = set(signals)
     strong_hits = len(signal_set & STRONG_FRAUD_SIGNALS)
 
-    # 3+ strong signals -> HIGH_FRAUD regardless of model
+    # 3+ strong signals → HIGH_FRAUD regardless of model
     if strong_hits >= 3:
         return "HIGH_FRAUD"
 
-    # 2+ strong signals -> at minimum SUSPICIOUS; escalate to HIGH_FRAUD if already SUSPICIOUS with high fp
+    # 2+ strong signals → SUSPICIOUS minimum, HIGH_FRAUD if model also agrees
     if strong_hits >= 2:
         if current_display == "LEGITIMATE":
             return "SUSPICIOUS"
         if current_display == "SUSPICIOUS" and fraud_probability >= 0.70:
             return "HIGH_FRAUD"
 
-    # 1 strong signal + moderate model confidence -> SUSPICIOUS
+    # When model is unavailable — trust signals fully, no fp threshold needed
+    if model_unavailable:
+        if strong_hits >= 2:
+            return "HIGH_FRAUD"
+        if strong_hits >= 1:
+            return "SUSPICIOUS"
+        # Even 1 weak signal is suspicious without model
+        if len(signal_set) >= 2:
+            return "SUSPICIOUS"
+        return None
+
+    # Normal path — 1 strong signal + moderate model confidence → SUSPICIOUS
     if strong_hits >= 1 and fraud_probability >= 0.35 and current_display == "LEGITIMATE":
         return "SUSPICIOUS"
 
-    return None  # no escalation needed
+    return None
 
 
 def _build_explanation(
@@ -346,8 +358,11 @@ def run(text: str, lang: str = "en") -> dict:
         display = "HIGH_FRAUD"
 
     # 5b. Signal-based escalation — fires when model is weak but signals are strong
+    # 5b. Signal-based escalation — fires when model is weak but signals are strong
     elif not overridden:
-        escalated = _signal_based_verdict(signals, result["fraud_probability"], display)
+        escalated = _signal_based_verdict(
+            signals, result["fraud_probability"], display, model_unavailable
+        )
         if escalated:
             display = escalated
 

@@ -1,41 +1,52 @@
-"""
-fraud_classifier.py
---------------------
-Loads the MuRIL ONNX model for fast local inference.
-No HuggingFace API — runs entirely on this server.
-
-Strategy:
-  1. Try ONNX model from services/ai/onnx_model/   (fast, ~100ms)
-  2. Try raw PyTorch model from ml/registry/        (slower, ~300ms)
-  3. Fall back to rule-based signals only           (0ms, still catches most fraud)
-
-The model is lazy-loaded once on first predict() call and cached
-for the lifetime of the process.
-
-Labels:
-  LABEL_0 = LEGITIMATE
-  LABEL_1 = FRAUD
-"""
-
 from __future__ import annotations
 
 import os
 import threading
 from pathlib import Path
 from dotenv import load_dotenv
+import requests
 
 load_dotenv()
 
 # ── Path resolution ───────────────────────────────────────────
-_THIS_DIR  = Path(__file__).resolve().parent   # services/ai/models/
-_AI_ROOT   = _THIS_DIR.parent                  # services/ai/
-_REPO_ROOT = _AI_ROOT.parent.parent            # fraudshield/
+_THIS_DIR  = Path(__file__).resolve().parent
+_AI_ROOT   = _THIS_DIR.parent
+_REPO_ROOT = _AI_ROOT.parent.parent
 
 # ONNX model (preferred — fast)
-ONNX_PATH    = _AI_ROOT / "onnx_model"
+ONNX_PATH = _AI_ROOT / "onnx_model"
+
+# 🔥 NEW: Hugging Face model download
+MODEL_URL  = "https://huggingface.co/Sanjai1968/fraud/resolve/main/model.onnx"
+MODEL_FILE = ONNX_PATH / "model.onnx"
+
+
+def _download_onnx_if_needed():
+    if MODEL_FILE.exists():
+        print("[classifier] ONNX already exists")
+        return
+
+    print("[classifier] ⬇️ Downloading ONNX model (~950MB)...")
+
+    os.makedirs(ONNX_PATH, exist_ok=True)
+
+    headers = {}
+    HF_TOKEN = os.getenv("HF_TOKEN")
+    if HF_TOKEN:
+        headers["Authorization"] = f"Bearer {HF_TOKEN}"
+
+    with requests.get(MODEL_URL, headers=headers, stream=True, timeout=60) as r:
+        r.raise_for_status()
+        with open(MODEL_FILE, "wb") as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+    print("[classifier] ✅ ONNX download complete")
+
 
 # PyTorch fallback
-_ENV_PATH    = os.getenv("MODEL_PATH", "")
+_ENV_PATH = os.getenv("MODEL_PATH", "")
 if _ENV_PATH:
     PT_PATH = Path(_ENV_PATH)
     if not PT_PATH.is_absolute():
@@ -48,18 +59,16 @@ VERSION = "v1"
 # ── Lazy-load state ───────────────────────────────────────────
 _model      = None
 _tokenizer  = None
-_mode       = None   # "onnx" | "pytorch" | "fallback"
+_mode       = None
 _lock       = threading.Lock()
 _load_done  = False
 
 
 def _try_load_onnx() -> bool:
-    """Attempt to load ONNX model. Returns True on success."""
     global _model, _tokenizer, _mode
 
-    if not ONNX_PATH.exists():
-        print(f"[classifier] ONNX model not found at {ONNX_PATH}")
-        return False
+    # 🔥 NEW: ensure model exists (download if needed)
+    _download_onnx_if_needed()
 
     required = ["model.onnx", "config.json", "tokenizer.json"]
     missing  = [f for f in required if not (ONNX_PATH / f).exists()]
@@ -89,7 +98,6 @@ def _try_load_onnx() -> bool:
 
 
 def _try_load_pytorch() -> bool:
-    """Attempt to load raw PyTorch model. Returns True on success."""
     global _model, _tokenizer, _mode
 
     if not PT_PATH.exists():
@@ -124,7 +132,6 @@ def _try_load_pytorch() -> bool:
 
 
 def _load_model():
-    """Try ONNX first, then PyTorch, then mark as fallback."""
     global _mode, _load_done
 
     if _try_load_onnx():
@@ -141,7 +148,6 @@ def _load_model():
 
 
 def _infer_onnx(text: str) -> dict:
-    """Run ONNX inference."""
     import torch
 
     inputs  = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
@@ -162,7 +168,6 @@ def _infer_onnx(text: str) -> dict:
 
 
 def _infer_pytorch(text: str) -> dict:
-    """Run PyTorch inference."""
     import torch
 
     inputs = _tokenizer(text, return_tensors="pt", truncation=True, max_length=512, padding=True)
@@ -170,7 +175,6 @@ def _infer_pytorch(text: str) -> dict:
         outputs = _model(**inputs)
     probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # Determine fraud index from config
     id2label   = getattr(_model.config, "id2label", {0: "LABEL_0", 1: "LABEL_1"})
     fraud_idx  = next(
         (int(k) for k, v in id2label.items() if str(v).upper() in ("LABEL_1", "FRAUD", "1")),
@@ -192,18 +196,8 @@ def _infer_pytorch(text: str) -> dict:
 
 
 def predict(text: str) -> dict:
-    """
-    Run inference on a single text string.
-
-    Returns:
-        verdict:           "FRAUD" | "LEGITIMATE"
-        confidence:        float 0-1
-        fraud_probability: float 0-1
-        model_version:     str
-    """
     global _load_done
 
-    # Thread-safe lazy load — only once
     with _lock:
         if not _load_done:
             _load_model()
@@ -222,11 +216,6 @@ def predict(text: str) -> dict:
 
 
 def _fallback_neutral() -> dict:
-    """
-    Neutral result when no model is available.
-    confidence=0.0 signals to the pipeline that the model was unavailable.
-    The pipeline's rule-based signals will still decide the verdict.
-    """
     return {
         "verdict":           "LEGITIMATE",
         "confidence":        0.0,

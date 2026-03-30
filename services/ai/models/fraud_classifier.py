@@ -13,7 +13,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MODEL_PATH = os.getenv("MODEL_PATH", "../../ml/registry/muril-fraud-v1")
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MODEL_PATH = os.getenv(
+    "MODEL_PATH",
+    str(BASE_DIR / "ml" / "registry" / "muril-fraud-v1")
+)
+print("MODEL PATH:", MODEL_PATH)
 VERSION    = "v1"
 
 _tokenizer = None

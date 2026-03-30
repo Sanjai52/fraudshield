@@ -140,6 +140,8 @@ def _load_model():
         _load_done = True
         return
 
+    print("[classifier] Loading model...")
+
     if _try_load_onnx():
         _mode = "onnx"
     elif _try_load_pytorch():
@@ -150,7 +152,6 @@ def _load_model():
 
     _model_loaded_once = True
     _load_done = True
-
 
 def _infer_onnx(text: str) -> dict:
     import torch

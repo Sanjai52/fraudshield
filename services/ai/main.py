@@ -1,10 +1,8 @@
 """
-main.py
---------
-FraudShield — FastAPI AI Engine (Production Ready)
+FraudShield — FastAPI AI Engine
 """
 
-# 🔥 MUST BE FIRST — fixes Railway import issues
+# 🔥 MUST BE FIRST (Railway fix)
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -15,37 +13,47 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import uuid
 import bleach
+import threading
 
-# ✅ FIXED IMPORT (IMPORTANT)
-from services.ai.models.fraud_classifier import predict
+# ✅ Correct import
+from services.ai.models.fraud_classifier import predict, _load_model
 
-# Existing pipelines (UNCHANGED)
+# Pipelines
 from pipelines.text_pipeline import run as run_text
 from pipelines.url_pipeline import run as run_url
 from pipelines.ner_pipeline import extract_entities
 from evidence.sender_ids import get_bank_sender_ids
 
-# Chatbot imports
+# Chatbot
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "chatbot"))
 from chatbot_llm import chat_with_gemini, analyse_message_for_chat, format_analysis_for_chat
 
 load_dotenv()
 
-# ─────────────────────────────────────────────────────────────
-# FASTAPI APP
-# ─────────────────────────────────────────────────────────────
-app = FastAPI(
-    title="FraudShield AI Engine",
-    description="Fraud detection API — text, URL, image, voice, chatbot",
-    version="1.0.0",
-)
+app = FastAPI(title="FraudShield AI Engine")
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# BACKGROUND MODEL LOADER (CRITICAL FIX)
+# ─────────────────────────────────────────
+def background_model_loader():
+    try:
+        print("🚀 Background loading model...")
+        _load_model()
+        print("✅ Model ready")
+    except Exception as e:
+        print("❌ Model load error:", e)
+
+@app.on_event("startup")
+def start_model_loading():
+    thread = threading.Thread(target=background_model_loader)
+    thread.start()
+
+# ─────────────────────────────────────────
 # CORS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 _ALLOWED = [o.strip() for o in os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:3001"
+    "http://localhost:3000"
 ).split(",") if o.strip()]
 
 app.add_middleware(
@@ -56,15 +64,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # LIMITS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 MAX_MESSAGE_LENGTH = 5000
 MAX_URL_LENGTH = 2048
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # SCHEMAS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 class TextAnalyseRequest(BaseModel):
     message: str
     lang: str = "en"
@@ -77,105 +85,70 @@ class ChatBody(BaseModel):
     message: str
     history: list = []
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # HEALTH
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "env": os.getenv("ENV", "production"),
-    }
+    return {"status": "ok"}
 
-# ─────────────────────────────────────────────────────────────
-# TEXT ANALYSIS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# TEXT
+# ─────────────────────────────────────────
 @app.post("/analyse/text")
 def analyse_text(body: TextAnalyseRequest):
     if not body.message.strip():
-        raise HTTPException(status_code=422, detail="message is required")
+        raise HTTPException(status_code=422, detail="message required")
 
-    if len(body.message) > MAX_MESSAGE_LENGTH:
-        raise HTTPException(status_code=422, detail="Message too long")
+    return run_text(body.message, body.lang)
 
-    result = run_text(body.message, body.lang)
-
-    if result.get("verdict") == "ERROR":
-        raise HTTPException(status_code=422, detail=result.get("explanation"))
-
-    return result
-
-# ─────────────────────────────────────────────────────────────
-# URL ANALYSIS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# URL
+# ─────────────────────────────────────────
 @app.post("/analyse/url")
 def analyse_url(body: UrlAnalyseRequest):
     if not body.url.strip():
-        raise HTTPException(status_code=422, detail="url is required")
-
-    if len(body.url) > MAX_URL_LENGTH:
-        raise HTTPException(status_code=422, detail="URL too long")
+        raise HTTPException(status_code=422, detail="url required")
 
     return run_url(body.url)
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 # SENDER IDS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
 @app.get("/sender-ids/{bank}")
 def sender_ids(bank: str):
     return get_bank_sender_ids(bank)
 
-# ─────────────────────────────────────────────────────────────
-# ENTITY EXTRACTION
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# ENTITIES
+# ─────────────────────────────────────────
 @app.post("/analyse/entities")
 def analyse_entities(body: TextAnalyseRequest):
     return extract_entities(body.message)
 
-# ─────────────────────────────────────────────────────────────
-# IMAGE ANALYSIS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# IMAGE
+# ─────────────────────────────────────────
 @app.post("/analyse/image")
 async def analyse_image(file: UploadFile = File(...)):
-    allowed = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
-
-    if file.content_type not in allowed:
-        raise HTTPException(status_code=422, detail="Use PNG, JPG, or WEBP")
-
     image_bytes = await file.read()
 
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=422, detail="Image too large")
-
     from pipelines.ocr_pipeline import run as ocr_run
-    result = ocr_run(image_bytes, file.filename or "")
+    return ocr_run(image_bytes, file.filename or "")
 
-    if result.get("verdict") == "ERROR":
-        raise HTTPException(status_code=422, detail=result.get("explanation"))
-
-    return result
-
-# ─────────────────────────────────────────────────────────────
-# VOICE ANALYSIS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# VOICE
+# ─────────────────────────────────────────
 @app.post("/analyse/voice")
 async def analyse_voice(file: UploadFile = File(...)):
     audio_bytes = await file.read()
 
-    if len(audio_bytes) > 25 * 1024 * 1024:
-        raise HTTPException(status_code=422, detail="Audio too large")
-
     from pipelines.voice_pipeline import run as voice_run
-    result = voice_run(audio_bytes, file.filename or "")
+    return voice_run(audio_bytes, file.filename or "")
 
-    if result.get("verdict") == "ERROR":
-        raise HTTPException(status_code=422, detail=result.get("explanation"))
-
-    return result
-
-# ─────────────────────────────────────────────────────────────
-# CHAT SYSTEM
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────
+# CHAT
+# ─────────────────────────────────────────
 _CHATS = {}
 
 def _user_key(request: Request):
@@ -196,13 +169,9 @@ async def chat(body: ChatBody, request: Request):
     uid = _user_key(request)
     msg = _sanitize(body.message)
 
-    if not msg:
-        raise HTTPException(status_code=400, detail="Empty message")
-
     _CHATS.setdefault(uid, {}).setdefault(body.chat_id, [])
     _CHATS[uid][body.chat_id].append({"role": "user", "content": msg})
 
-    # SMS fraud detection shortcut
     analysis = await analyse_message_for_chat(msg)
     if analysis:
         reply = format_analysis_for_chat(analysis)

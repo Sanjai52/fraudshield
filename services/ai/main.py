@@ -18,8 +18,7 @@ import uuid
 import bleach
 from fastapi import Header
 from jose import jwt, JWTError
-import io
-from models.fraud_classifier import _load
+from models.fraud_classifier import predict
 
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")

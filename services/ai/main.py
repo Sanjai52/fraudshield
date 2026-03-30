@@ -15,8 +15,13 @@ import uuid
 import bleach
 import threading
 
-# ✅ Correct import
-from services.ai.models.fraud_classifier import predict, _load_model
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+sys.path.append(os.path.join(BASE_DIR, "services"))
+sys.path.append(os.path.join(BASE_DIR, "services", "ai"))
+
+# NOW imports will work
+from models.fraud_classifier import predict, _load_model
 
 # Pipelines
 from pipelines.text_pipeline import run as run_text

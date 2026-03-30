@@ -7,6 +7,7 @@ Run:
     uvicorn main:app --reload --port 8000
 """
 
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,11 +21,7 @@ from jose import jwt, JWTError
 import io
 from models.fraud_classifier import _load
 
-@app.on_event("startup")
-def load_model():
-    print("🚀 Preloading model...")
-    _load()
-    
+
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 load_dotenv()
@@ -35,6 +32,11 @@ app = FastAPI(
     version="1.0.0",
 )
 
+@app.on_event("startup")
+def load_model():
+    print("🚀 Preloading model...")
+    _load()
+    
 # Gateway only — never the browser directly
 _ALLOWED = [o.strip() for o in os.getenv(
     "ALLOWED_ORIGINS",

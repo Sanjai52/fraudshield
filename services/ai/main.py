@@ -18,7 +18,13 @@ import bleach
 from fastapi import Header
 from jose import jwt, JWTError
 import io
+from models.fraud_classifier import _load
 
+@app.on_event("startup")
+def load_model():
+    print("🚀 Preloading model...")
+    _load()
+    
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 load_dotenv()

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import uuid
 import bleach
-import threading
+
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -37,21 +37,7 @@ load_dotenv()
 
 app = FastAPI(title="FraudShield AI Engine")
 
-# ─────────────────────────────────────────
-# BACKGROUND MODEL LOADER (CRITICAL FIX)
-# ─────────────────────────────────────────
-def background_model_loader():
-    try:
-        print("🚀 Background loading model...")
-        _load_model()
-        print("✅ Model ready")
-    except Exception as e:
-        print("❌ Model load error:", e)
 
-@app.on_event("startup")
-def start_model_loading():
-    thread = threading.Thread(target=background_model_loader)
-    thread.start()
 
 # ─────────────────────────────────────────
 # CORS

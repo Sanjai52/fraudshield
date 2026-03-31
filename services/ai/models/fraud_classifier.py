@@ -17,8 +17,8 @@ _REPO_ROOT = _AI_ROOT.parent.parent
 ONNX_PATH = _AI_ROOT / "onnx_model"
 
 # 🔥 NEW: Hugging Face model download
-MODEL_URL  = "https://huggingface.co/Sanjai1968/fraud/resolve/main/model.onnx"
-MODEL_FILE = ONNX_PATH / "model.onnx"
+MODEL_URL  = "https://huggingface.co/Sanjai1968/fraud/resolve/main/model_quantized.onnx"
+MODEL_FILE = ONNX_PATH / "model_quantized.onnx"
 
 _model_loaded_once = False
 

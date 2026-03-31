@@ -71,7 +71,7 @@ def _try_load_onnx() -> bool:
     # 🔥 NEW: ensure model exists (download if needed)
     _download_onnx_if_needed()
 
-    required = ["model.onnx", "config.json", "tokenizer.json"]
+    required = ["model_quantized.onnx", "config.json", "tokenizer.json"]
     missing  = [f for f in required if not (ONNX_PATH / f).exists()]
     if missing:
         print(f"[classifier] ONNX model incomplete — missing: {missing}")
@@ -83,8 +83,10 @@ def _try_load_onnx() -> bool:
 
         print(f"[classifier] Loading ONNX model from {ONNX_PATH} ...")
         _tokenizer = AutoTokenizer.from_pretrained(str(ONNX_PATH), local_files_only=True)
-        _model     = ORTModelForSequenceClassification.from_pretrained(
-            str(ONNX_PATH), local_files_only=True
+        _model = ORTModelForSequenceClassification.from_pretrained(
+            str(ONNX_PATH),
+            file_name="model_quantized.onnx",
+            local_files_only=True
         )
         _mode = "onnx"
         print(f"[classifier] ✅ ONNX model loaded — fast inference ready")

@@ -42,18 +42,21 @@ app = FastAPI(title="FraudShield AI Engine")
 # ─────────────────────────────────────────
 # CORS
 # ─────────────────────────────────────────
-_ALLOWED = [o.strip() for o in os.getenv(
-    "ALLOWED_ORIGINS",
-    "http://localhost:3000"
-).split(",") if o.strip()]
+origins = [
+    "https://fraudshield-fawn.vercel.app",
+    "https://fraudshield-8sqp.vercel.app",
+    "http://localhost:3000",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_ALLOWED,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 
 # ─────────────────────────────────────────
 # LIMITS

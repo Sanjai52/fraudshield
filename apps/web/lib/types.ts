@@ -5,6 +5,8 @@ export type DisplayVerdict = "HIGH_FRAUD" | "SUSPICIOUS" | "LEGITIMATE";
 export type RawVerdict = "FRAUD" | "LEGITIMATE";
 
 // Sender validation
+
+
 export interface SenderCheck {
   sender:           string;
   status:           "verified" | "known_fake" | "unknown";

@@ -2,7 +2,7 @@ import type { AnalysisResult } from "./types";
 import { createClient } from "./supabase";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-const AI_DIRECT = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+
 
 
 async function getAuthHeaders(): Promise<Record<string, string>> {

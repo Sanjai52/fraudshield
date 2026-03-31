@@ -1,7 +1,7 @@
 import type { AnalysisResult } from "./types";
 import { createClient } from "./supabase";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const BASE_URL =process.env.NEXT_PUBLIC_API_URL || "https://fraudshield-production-aea6.up.railway.app";
 
 
 

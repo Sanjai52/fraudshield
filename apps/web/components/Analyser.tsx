@@ -2,8 +2,10 @@
 
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { analyseText, analyseUrl } from "@/lib/api";
+import { analyseText, analyseUrl,analyseImage,analyseVoice } from "@/lib/api";
 import type { DisplayVerdict } from "@/lib/types";
+import { storeAnalysis } from "@/lib/db";
+import { getUser } from "@/lib/auth";
 
 type Tab = "text" | "url" | "screenshot" | "voice";
 
@@ -75,6 +77,9 @@ export default function Analyser() {
       } else if (tab === "voice") {
         throw new Error("Voice analysis is coming soon! For now, transcribe the message and use the Text tab.");
       }
+      const user = await getUser();
+
+      await storeAnalysis(data, tab, user?.id ?? null);
 
       localStorage.removeItem("fraud_result");
       localStorage.setItem("fraud_result", JSON.stringify({

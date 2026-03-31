@@ -10,8 +10,13 @@ export async function storeAnalysis(result: any, inputType: string, userId: stri
     .insert({
       user_id:          userId,
       input_type:       inputType,
-      verdict:          result.verdict === "FRAUD" ? "FRAUD" : result.verdict === "ERROR" ? "ERROR" : "LEGITIMATE",
-      display_verdict:  result.display_verdict,
+      verdict:         result.display_verdict === "HIGH_FRAUD"  ? "FRAUD"
+               : result.display_verdict === "SUSPICIOUS"  ? "FRAUD"
+               : result.verdict         === "FRAUD"       ? "FRAUD"
+               : result.verdict         === "ERROR"       ? "ERROR"
+               : "LEGITIMATE",
+      display_verdict: result.display_verdict ?? result.verdict ?? "LEGITIMATE",
+  
       confidence:       result.confidence ?? 0,
       fraud_probability: result.fraud_probability ?? 0,
       signals:          result.signals ?? [],

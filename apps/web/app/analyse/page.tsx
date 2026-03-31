@@ -3,6 +3,8 @@
 import { useState, useRef } from "react";
 import { analyseText, analyseUrl, analyseImage, analyseVoice } from "@/lib/api";
 import type { DisplayVerdict } from "@/lib/types";
+import { storeAnalysis } from "@/lib/db";
+import { createClient } from "@/lib/supabase";
 
 // ── Types ─────────────────────────────────────────────────────
 type Tab = "text" | "url" | "screenshot" | "voice";
@@ -131,7 +133,17 @@ export default function AnalysePage() {
         tab === "screenshot" ? imgFile!.name     :
                                audioFile!.name;
 
-      setResult(normalise(raw, tab, input));
+      const normalised = normalise(raw, tab, input);
+      setResult(normalised);
+
+      // Save to Supabase in the background (don't block UI)
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        await storeAnalysis(normalised, tab, user?.id ?? null);
+      } catch (dbErr) {
+        console.error("DB save failed (non-critical):", dbErr);
+      }
     } catch (err: any) {
       setError(
         err.message?.includes("fetch") || err.message?.includes("Failed")

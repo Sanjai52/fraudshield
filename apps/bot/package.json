@@ -1,0 +1,16 @@
+{
+  "name": "fraudshield-bot",
+  "version": "1.0.0",
+  "main": "webhook.js",
+  "scripts": {
+    "start": "node webhook.js",
+    "dev": "nodemon webhook.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "twilio": "^5.1.0",
+    "node-fetch": "^2.7.0",
+    "dotenv": "^16.4.5",
+    "form-data": "^4.0.5"
+  }
+}

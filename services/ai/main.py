@@ -34,7 +34,7 @@ def _bg_load():
 
 threading.Thread(target=_bg_load, daemon=True).start()
 
-origins = [
+_origins = [
     "https://fraudshield-fawn.vercel.app",
     "https://fraudshield-8sqp.vercel.app",
     "http://localhost:3000",

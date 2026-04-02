@@ -249,11 +249,14 @@ def _check_virustotal(url: str) -> dict:
             timeout=TIMEOUT
         )
         # Wait for scan to complete
-        time.sleep(15)
-        # Fetch result after scan
-        result = _fetch(url_id)
-        if result:
-            return result
+        return {
+            "success":    True,
+            "malicious":  0,
+            "total":      0,
+            "score":      "scan_pending",
+            "suspicious": False,
+            "note":       "URL submitted — not yet scanned",
+        }
     except Exception as e:
         return {
             "success":    False,
@@ -277,42 +280,17 @@ def _check_virustotal(url: str) -> dict:
 
 def _check_phishtank(url: str) -> dict:
     """
-    Check URL against PhishTank crowd-verified phishing database.
-    Free API key required — register at phishtank.org
+    PhishTank API is currently unavailable (service errors).
+    Stubbed out — returns neutral result so it doesn't block the pipeline.
+    Re-enable when PhishTank restores service.
     """
-    pt_key = os.getenv("PHISHTANK_KEY", "")
-
-    try:
-        data = {
-            "url":    _clean_url(url),
-            "format": "json",
-        }
-        if pt_key:
-            data["app_key"] = pt_key
-
-        r = requests.post(
-            "https://checkurl.phishtank.com/checkurl/",
-            data=data,
-            headers={"User-Agent": "fraudshield-checker/1.0"},
-            timeout=TIMEOUT,
-        )
-        if r.status_code == 200:
-            results = r.json().get("results", {})
-            in_db   = results.get("in_database", False)
-            valid   = results.get("valid", False)
-            return {
-                "success":     True,
-                "in_database": in_db,
-                "verified":    valid,
-                "hit":         in_db and valid,
-            }
-        return {
-            "success": False,
-            "hit":     False,
-            "error":   f"HTTP {r.status_code}",
-        }
-    except Exception as e:
-        return {"success": False, "hit": False, "error": str(e)}
+    return {
+        "success":     False,
+        "hit":         False,
+        "in_database": False,
+        "verified":    False,
+        "error":       "PhishTank service unavailable — skipped",
+    }
 
 # ── Check 5: Domain Heuristics ────────────────────────────────
 

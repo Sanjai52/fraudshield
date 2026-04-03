@@ -20,6 +20,7 @@ from pipelines.text_pipeline  import run as run_text
 from pipelines.url_pipeline   import run as run_url
 from pipelines.ner_pipeline   import extract_entities
 from evidence.sender_ids      import get_bank_sender_ids
+from chatbot.router import router as chatbot_router
 
 load_dotenv()
 
@@ -56,10 +57,7 @@ class TextAnalyseRequest(BaseModel):
 class UrlAnalyseRequest(BaseModel):
     url: str
 
-class ChatBody(BaseModel):
-    chat_id: str
-    message: str
-    history: list = []
+
 
 # ── Health ────────────────────────────────────────────────────
 @app.get("/health")
@@ -134,20 +132,7 @@ async def analyse_voice(file: UploadFile = File(...)):
         raise HTTPException(422, result.get("explanation"))
     return result
 
-# ── Chat (stub — chatbot runs separately) ─────────────────────
-_CHATS: dict = {}
-
-@app.post("/chat/new")
-async def chat_new(request: Request):
-    cid = str(uuid.uuid4())
-    return {"chat_id": cid}
-
-@app.post("/chat")
-async def chat(body: ChatBody, request: Request):
-    return {
-        "reply": "Chatbot is not available in this deployment. Please use the web interface.",
-        "chat_id": body.chat_id,
-    }
+app.include_router(chatbot_router)
 
 # ── Feedback / report stubs ───────────────────────────────────
 @app.post("/feedback")

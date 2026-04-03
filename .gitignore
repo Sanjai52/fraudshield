@@ -9,7 +9,11 @@ venv/
 
 # Training data — too large / reproducible via scripts
 ml/data/raw/
-ml/data/processed/*.csv
+ml/data/processed/*
+
+services/ai/onnx_model/
+services/ai/ml/
+
 
 # Model weights — too large for git
 ml/registry/

@@ -1,9 +1,6 @@
 import type { AnalysisResult } from "./types";
 import { createClient } from "./supabase";
-
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL!;
-
-
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const supabase = createClient();

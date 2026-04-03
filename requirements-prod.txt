@@ -1,0 +1,45 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Core backend
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.6.4
+
+# Utils
+python-dotenv==1.0.1
+httpx==0.25.2
+requests==2.31.0
+bleach==6.1.0
+
+# Auth
+python-jose[cryptography]==3.3.0
+
+# File handling
+python-multipart==0.0.9
+
+# Rate limiting
+slowapi==0.1.9
+
+# Gemini
+google-genai==0.3.0
+
+# ML (ONLY inference)
+torch==2.2.2+cpu
+optimum[onnxruntime]==1.20.0
+onnxruntime==1.18.1
+
+# Essentials
+numpy==1.26.0
+pandas==2.2.0
+scikit-learn==1.4.0
+
+# Text
+beautifulsoup4==4.12.0
+langdetect==1.0.9
+
+# OCR
+Pillow==11.0.0
+pytesseract==0.3.10
+
+# Audio
+soundfile==0.12.1

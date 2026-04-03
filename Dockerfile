@@ -8,13 +8,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy requirements FIRST (better caching)
-COPY requirements.txt .
+# Copy lightweight requirements
+COPY requirements-prod.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements-prod.txt
 
-# Copy rest of project
+# Copy project
 COPY . .
 
-# Start FastAPI (IMPORTANT FIX HERE)
+# Start FastAPI
 CMD ["uvicorn", "services.ai.main:app", "--host", "0.0.0.0", "--port", "8000"]

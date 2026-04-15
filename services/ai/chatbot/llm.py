@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-_ANALYSE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8000")
-_MODEL       = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+_ANALYSE_URL = os.getenv("AI_SERVICE_URL")
+_MODEL       = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 

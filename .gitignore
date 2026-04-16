@@ -10,7 +10,9 @@ venv/
 # Training data — too large / reproducible via scripts
 ml/data/raw/
 ml/data/processed/*
-
+dataset.docx
+dataset.txt
+data-model.docx
 services/ai/onnx_model/
 services/ai/ml/
 

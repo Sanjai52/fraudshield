@@ -21,10 +21,10 @@ export default function Nav() {
   const pathname = usePathname();
   const router   = useRouter();
 
-  useEffect(() => {
-    const saved      = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const isDark     = saved ? saved === "dark" : prefersDark;
+ useEffect(() => {
+    const saved  = localStorage.getItem("theme");
+    // Default is dark — only switch to light if user explicitly saved "light"
+    const isDark = saved ? saved === "dark" : true;
     setDark(isDark);
     document.documentElement.classList.toggle("dark", isDark);
   }, []);

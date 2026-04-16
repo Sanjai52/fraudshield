@@ -4,7 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import Nav from "@/components/Nav";
 import ChatBot from "@/components/ChatBot";
-
+import Footer from "@/components/Footer";
 const dmSans = DM_Sans({
   subsets:  ["latin"],
   variable: "--font-body",
@@ -35,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-
+/* 
 function Footer() {
   return (
     <footer style={{
@@ -79,4 +79,4 @@ function Footer() {
       </div>
     </footer>
   );
-}
+} */
